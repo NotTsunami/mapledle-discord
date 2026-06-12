@@ -1,0 +1,33 @@
+services:
+  activity:
+    build:
+      context: .
+      args:
+        VITE_DISCORD_CLIENT_ID: ${VITE_DISCORD_CLIENT_ID:?set VITE_DISCORD_CLIENT_ID in .env}
+        VITE_RESOURCE_BASE: ${VITE_RESOURCE_BASE:-}
+    image: mapledoro-discord-activity:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      VITE_DISCORD_CLIENT_ID: ${VITE_DISCORD_CLIENT_ID:?set VITE_DISCORD_CLIENT_ID in .env}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?set DISCORD_CLIENT_SECRET in .env}
+      # Optional: enables the /interactions endpoint + scoreboard launch cards.
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DATA_DIR: /app/data
+    volumes:
+      - activity-data:/app/data   # daily scoreboard results + posted message ids
+    expose:
+      - "3000"            # internal network only — intentionally no host "ports:" mapping
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - activity
+
+volumes:
+  activity-data:

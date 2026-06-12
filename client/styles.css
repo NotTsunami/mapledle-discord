@@ -1,0 +1,121 @@
+/*
+  Trimmed port of mapledoro's globals.css — only the classes the Skill Guesser
+  components use. Fonts are self-hosted via @fontsource (imported in main.tsx);
+  the variable names match mapledoro's next/font setup.
+*/
+
+:root {
+  --font-body: "Nunito", "Segoe UI", system-ui, sans-serif;
+  --font-heading: "Fredoka", var(--font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.fade-in {
+  animation: fadeUp 0.5s ease forwards;
+  opacity: 0;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-content {
+  width: 100%;
+  padding: 1rem 1.5rem 1.25rem;
+}
+
+.tool-container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.tool-header {
+  margin-bottom: 0.9rem;
+}
+
+.tool-header-title {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  margin-top: 0.15rem;
+}
+
+.tool-header-desc {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-top: 0.15rem;
+  line-height: 1.5;
+}
+
+.panel-card {
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.tool-input {
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid; /* color supplied inline via borderColor */
+  padding: 7px 10px;
+}
+
+/* Uppercase field label sitting above a control */
+.tool-field-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+input:focus-visible {
+  outline: 2px solid;
+  outline-offset: 2px;
+}
+
+.tool-btn {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s;
+  font-family: var(--font-body); /* native <button> doesn't inherit it */
+}
+
+/* Dialog / modal action button shape. Colors supplied inline per variant. */
+.tool-dialog-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .page-content {
+    padding: 0.75rem 1rem 1rem;
+  }
+}

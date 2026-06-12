@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Tooling caches
+*.tsbuildinfo
+.vite/
+.eslintcache
+
+# OS / editor
+.DS_Store
+Thumbs.db
