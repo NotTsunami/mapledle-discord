@@ -30,6 +30,8 @@ interface StoreShape {
   version: 1;
   /** puzzleNumber -> guildId -> results. */
   days: Record<string, Record<string, GuildDay>>;
+  /** Last day whose end-of-day final scoreboards have been posted. */
+  finalizedDay?: number;
 }
 
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
@@ -62,6 +64,20 @@ function prune(currentDay: number): void {
 
 export function getGuildDay(day: number, guildId: string): GuildDay | null {
   return store.days[String(day)]?.[guildId] ?? null;
+}
+
+/** Every guild with results or cards for the day: guildId -> entry. */
+export function getDayGuilds(day: number): Record<string, GuildDay> {
+  return store.days[String(day)] ?? {};
+}
+
+export function getFinalizedDay(): number {
+  return store.finalizedDay ?? 0;
+}
+
+export function setFinalizedDay(day: number): void {
+  store.finalizedDay = day;
+  save();
 }
 
 function ensureGuildDay(day: number, guildId: string): GuildDay {

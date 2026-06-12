@@ -1,8 +1,11 @@
 /*
-  One-time setup: switch the app's Entry Point command from
-  DISCORD_LAUNCH_ACTIVITY (Discord posts its stock "Join" card) to APP_HANDLER
-  (Discord sends the launch interaction to our /interactions endpoint, which
-  launches the activity AND posts the custom scoreboard card).
+  One-time setup:
+  1. Switch the app's Entry Point command from DISCORD_LAUNCH_ACTIVITY
+     (Discord posts its stock "Join" card) to APP_HANDLER (Discord sends the
+     launch interaction to our /interactions endpoint, which launches the
+     activity AND posts the custom scoreboard card).
+  2. Register the /start slash command (Wordle-style), which launches the
+     activity the same way.
 
   Usage: npm run configure-entry-point   (needs DISCORD_BOT_TOKEN in .env)
 
@@ -21,6 +24,7 @@ const API = "https://discord.com/api/v10";
 const HEADERS = { Authorization: `Bot ${TOKEN}`, "Content-Type": "application/json" };
 
 // Entry Point commands are type 4; handler 1 = APP_HANDLER, 2 = DISCORD_LAUNCH_ACTIVITY.
+const CHAT_INPUT = 1;
 const PRIMARY_ENTRY_POINT = 4;
 const APP_HANDLER = 1;
 
@@ -59,6 +63,20 @@ if (entryPoint) {
     contexts: [0, 1, 2], // guild, bot DM, private channel
   });
   console.log(`Created Entry Point command "${created.name}" with APP_HANDLER.`);
+}
+
+const startCommand = commands.find((c) => c.type === CHAT_INPUT && c.name === "start");
+if (startCommand) {
+  console.log(`/start command already registered — nothing to do.`);
+} else {
+  await api("POST", `/applications/${appInfo.id}/commands`, {
+    name: "start",
+    description: "Play today's Mapledle",
+    type: CHAT_INPUT,
+    integration_types: [0, 1], // guild + user install
+    contexts: [0, 1, 2], // guild, bot DM, private channel
+  });
+  console.log(`Registered the /start command.`);
 }
 
 console.log(

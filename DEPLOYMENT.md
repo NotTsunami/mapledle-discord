@@ -139,7 +139,11 @@ The client ID and `VITE_RESOURCE_BASE` are baked into the client bundle at
 By default Discord posts its stock "started a game / Join" card when the
 activity launches. With this set up, the app instead posts a generated
 Wordle-style scoreboard image (today's finishers in that server + a **Play**
-button) and edits it as more results come in.
+button) and edits it as more results come in. At the UTC day rollover the
+finished board is re-posted as a new "final results" message, and the first
+result for the next puzzle starts a fresh card instead of touching the old
+one. A `/start` slash command (registered in step 2) launches the activity
+the same way as the Entry Point command.
 
 1. Add to `.env` on the host:
 
@@ -151,8 +155,9 @@ button) and edits it as more results come in.
    then `docker compose up -d` (recreate; a plain `restart` does not re-read
    `.env`). The boot log warns if either is missing.
 
-2. Switch the Entry Point command to `APP_HANDLER` (one-time, from any
-   machine with the repo and a `.env` containing `DISCORD_BOT_TOKEN`):
+2. Switch the Entry Point command to `APP_HANDLER` and register the `/start`
+   slash command (one-time, from any machine with the repo and a `.env`
+   containing `DISCORD_BOT_TOKEN`):
 
    ```bash
    npm run configure-entry-point

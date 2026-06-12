@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+scoreboard-preview*.png
 
 # Environment / secrets
 .env

@@ -26,6 +26,7 @@ import {
   MAX_GUESSES,
   currentPuzzleNumber,
   postOrUpdateScoreboard,
+  scheduleEndOfDayScoreboards,
   scoreboardEnabled,
   updateGuildScoreboards,
 } from "./scoreboard.ts";
@@ -48,6 +49,8 @@ if (!PUBLIC_KEY || !scoreboardEnabled()) {
 }
 
 loadStore();
+// At each UTC rollover, post the ended day's final scoreboards as new messages.
+scheduleEndOfDayScoreboards();
 
 type RawBodyRequest = Request & { rawBody?: Buffer };
 
@@ -154,8 +157,9 @@ function handleInteraction(req: Request, res: Response): void {
       res.json({ type: Callback.PONG });
       return;
     case InteractionType.APPLICATION_COMMAND:
-      // The Entry Point command: launch the activity, then drop/refresh the
-      // scoreboard card in the channel it was launched from.
+      // The Entry Point command and the /start slash command: launch the
+      // activity, then drop/refresh the scoreboard card in the channel it
+      // was launched from.
       res.json({ type: Callback.LAUNCH_ACTIVITY });
       if (interaction.guild_id && channelId) {
         void postOrUpdateScoreboard(currentPuzzleNumber(), interaction.guild_id, channelId);
@@ -243,7 +247,10 @@ function handleResult(req: Request, res: Response): void {
   );
   res.json({ ok: true });
 
-  if (scoreboardEnabled()) void updateGuildScoreboards(day, b.guildId as string);
+  // Include the reporting channel: if it has no card for this day yet (the
+  // player launched from an older day's post), a new card is posted there
+  // rather than editing the old day's message.
+  if (scoreboardEnabled()) void updateGuildScoreboards(day, b.guildId as string, b.channelId as string);
 }
 
 /* ------------------------------------------------------------------ */

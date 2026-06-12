@@ -1,6 +1,7 @@
 /*
-  Renders a sample scoreboard card to scoreboard-preview.png so the layout can
-  be checked without launching the activity in Discord.
+  Renders a sample scoreboard card to scoreboard-preview.png (and the
+  end-of-day variant to scoreboard-preview-final.png) so the layout can be
+  checked without launching the activity in Discord.
 
   Usage: node scripts/preview-scoreboard.mjs
 */
@@ -28,3 +29,7 @@ const players = [
 const png = await renderScoreboard(42, players);
 fs.writeFileSync("scoreboard-preview.png", png);
 console.log(`Wrote scoreboard-preview.png (${png.length} bytes)`);
+
+const finalPng = await renderScoreboard(42, players, true);
+fs.writeFileSync("scoreboard-preview-final.png", finalPng);
+console.log(`Wrote scoreboard-preview-final.png (${finalPng.length} bytes)`);

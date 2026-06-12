@@ -5,7 +5,10 @@
   post a generated PNG showing everyone in the guild who has finished today's
   puzzle — avatar, name, and their guess row — plus a "Play" button that
   re-launches the activity. As more results arrive via POST /api/result, the
-  card is edited in place.
+  card is edited in place. When the UTC day rolls over, the finished board is
+  posted again as a new "final results" message; the next day's results then
+  start a fresh card rather than touching the old one (cards are keyed by
+  puzzle number).
 
   Rendering uses @napi-rs/canvas; the guess squares are drawn as rects (no
   emoji font needed), so only a basic sans font must exist in the container
@@ -15,7 +18,10 @@
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import {
   clearScoreboardMessage,
+  getDayGuilds,
+  getFinalizedDay,
   getGuildDay,
+  setFinalizedDay,
   setScoreboardMessage,
   type PlayerResult,
 } from "./store.ts";
@@ -32,6 +38,11 @@ export const MAX_GUESSES = 5;
 
 export function currentPuzzleNumber(nowMs = Date.now()): number {
   return Math.max(1, Math.floor((nowMs - EPOCH_UTC_MS) / DAY_MS) + 1);
+}
+
+/** Milliseconds until the next 00:00:00 UTC rollover (mirrors the client). */
+export function msUntilNextPuzzle(nowMs = Date.now()): number {
+  return DAY_MS - ((nowMs - EPOCH_UTC_MS) % DAY_MS);
 }
 
 export function scoreboardEnabled(): boolean {
@@ -148,7 +159,7 @@ export interface PlayerRow extends PlayerResult {
 }
 
 /** Exported for scripts/preview-scoreboard.mjs. */
-export async function renderScoreboard(day: number, players: PlayerRow[]): Promise<Buffer> {
+export async function renderScoreboard(day: number, players: PlayerRow[], final = false): Promise<Buffer> {
   const sorted = [...players].sort((a, b) => {
     if (a.won !== b.won) return a.won ? -1 : 1;
     if (a.marks.length !== b.marks.length) return a.marks.length - b.marks.length;
@@ -172,10 +183,16 @@ export async function renderScoreboard(day: number, players: PlayerRow[]): Promi
   ctx.textAlign = "left";
   ctx.fillStyle = C.accent;
   ctx.font = `bold 26px ${FONT}`;
-  ctx.fillText(`Mapledle #${day} - A MapleDoro Game`, PAD, 42);
+  ctx.fillText(`Mapledle #${day}`, PAD, 42);
   ctx.fillStyle = C.muted;
   ctx.font = `13px ${FONT}`;
-  ctx.fillText("Today's results — guess which class learns the skill shown", PAD, 66);
+  ctx.fillText(
+    final
+      ? "Final results — hit Play to take on today's puzzle"
+      : "Today's results — guess which class learns the skill shown",
+    PAD,
+    66,
+  );
 
   if (rows.length === 0) {
     ctx.fillStyle = C.text;
@@ -265,16 +282,18 @@ function withChannelLock(channelId: string, fn: () => Promise<void>): Promise<vo
   return next;
 }
 
+function playerRows(day: number, guildId: string): PlayerRow[] {
+  const entry = getGuildDay(day, guildId);
+  return entry ? Object.entries(entry.players).map(([userId, result]) => ({ userId, ...result })) : [];
+}
+
 /** Post the day's card in a channel, or refresh it if one already exists. */
 export function postOrUpdateScoreboard(day: number, guildId: string, channelId: string): Promise<void> {
   if (!BOT_TOKEN) return Promise.resolve();
   return withChannelLock(channelId, async () => {
-    const entry = getGuildDay(day, guildId);
-    const players = entry
-      ? Object.entries(entry.players).map(([userId, result]) => ({ userId, ...result }))
-      : [];
-    const png = await renderScoreboard(day, players);
+    const png = await renderScoreboard(day, playerRows(day, guildId), day < currentPuzzleNumber());
     const payload = messagePayload();
+    const entry = getGuildDay(day, guildId);
 
     const existing = entry?.messages[channelId];
     if (existing) {
@@ -299,11 +318,53 @@ export function postOrUpdateScoreboard(day: number, guildId: string, channelId: 
   });
 }
 
-/** Refresh every channel card this guild has for the day (after a new result). */
-export async function updateGuildScoreboards(day: number, guildId: string): Promise<void> {
+/**
+  Refresh every channel card this guild has for the day (after a new result).
+  `alsoChannelId` — the channel the result came from — gets a fresh post if no
+  card exists for the day there yet (e.g. the player launched from a previous
+  day's card), instead of editing that old post.
+*/
+export async function updateGuildScoreboards(day: number, guildId: string, alsoChannelId?: string): Promise<void> {
   const entry = getGuildDay(day, guildId);
-  if (!entry) return;
-  for (const channelId of Object.keys(entry.messages)) {
+  const channels = new Set(entry ? Object.keys(entry.messages) : []);
+  if (alsoChannelId) channels.add(alsoChannelId);
+  for (const channelId of channels) {
     await postOrUpdateScoreboard(day, guildId, channelId);
   }
+}
+
+/*
+  End-of-day finalization: when the UTC day rolls over, post each channel's
+  finished scoreboard as a NEW message (the play button now launches the next
+  puzzle). The new message replaces the old one in the store, so any straggler
+  results that arrive in the rollover grace window edit the final post.
+*/
+export async function postFinalScoreboards(): Promise<void> {
+  if (!BOT_TOKEN) return;
+  const endedDay = currentPuzzleNumber() - 1;
+  if (endedDay < 1 || getFinalizedDay() >= endedDay) return;
+  setFinalizedDay(endedDay);
+
+  for (const [guildId, entry] of Object.entries(getDayGuilds(endedDay))) {
+    for (const channelId of Object.keys(entry.messages)) {
+      await withChannelLock(channelId, async () => {
+        const png = await renderScoreboard(endedDay, playerRows(endedDay, guildId), true);
+        const res = await discordRequest("POST", `/channels/${channelId}/messages`, messagePayload(), png);
+        if (!res.ok) {
+          console.error(`final scoreboard post failed (${res.status}): ${await res.text()}`);
+          return;
+        }
+        const message = (await res.json()) as { id: string };
+        setScoreboardMessage(endedDay, guildId, channelId, message.id);
+      });
+    }
+  }
+}
+
+/** Post finals for any day that ended while we were down, then at every rollover. */
+export function scheduleEndOfDayScoreboards(): void {
+  if (!BOT_TOKEN) return;
+  void postFinalScoreboards();
+  // Small buffer past midnight so currentPuzzleNumber() has definitely rolled.
+  setTimeout(() => scheduleEndOfDayScoreboards(), msUntilNextPuzzle() + 2000);
 }
