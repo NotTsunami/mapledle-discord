@@ -10,9 +10,9 @@
   start a fresh card rather than touching the old one (cards are keyed by
   puzzle number).
 
-  Rendering uses @napi-rs/canvas; the guess squares are drawn as rects (no
-  emoji font needed), so only a basic sans font must exist in the container
-  (font-dejavu is installed in the Dockerfile).
+  Rendering uses @napi-rs/canvas; the guess squares are drawn as rects. Names
+  can contain CJK characters and emoji, so the container ships font-dejavu
+  (Latin), font-noto-cjk (CJK), and font-noto-emoji (emoji) — see the Dockerfile.
 */
 
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
@@ -65,7 +65,10 @@ const C = {
   miss: "#c44040",
 };
 
-const FONT = '"DejaVu Sans", "Segoe UI", sans-serif';
+// CJK and emoji families are listed so names resolve to a font that has those glyphs;
+// @napi-rs/canvas also falls back per-glyph across loaded system fonts.
+const FONT =
+  '"DejaVu Sans", "Noto Sans CJK SC", "Noto Sans CJK", "Noto Color Emoji", "Noto Emoji", "Segoe UI", sans-serif';
 const WIDTH = 640;
 const PAD = 24;
 const HEADER_H = 86;

@@ -19,9 +19,13 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
-# @napi-rs/canvas needs a system font for the scoreboard card text, and the
-# scoreboard store persists to /app/data (volume-mounted in compose).
-RUN apk add --no-cache font-dejavu && mkdir -p /app/data && chown node:node /app/data
+# @napi-rs/canvas needs system fonts for the scoreboard card text: font-dejavu
+# covers Latin/Cyrillic/Greek, font-noto-cjk covers CJK names, and
+# font-noto-emoji covers emoji in names — without these they render as tofu
+# boxes. @napi-rs/canvas loads system fonts at startup and falls back per-glyph
+# across them. The scoreboard store persists to /app/data (volume-mounted in
+# compose).
+RUN apk add --no-cache font-dejavu font-noto-cjk font-noto-emoji && mkdir -p /app/data && chown node:node /app/data
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
