@@ -30,6 +30,11 @@ export default function HelpDialog({ theme, onClose }: { theme: AppTheme; onClos
         weapon after 4. A new puzzle arrives every day at 00:00 UTC.
       </div>
 
+      <div style={{ fontSize: "0.82rem", fontWeight: 600, color: theme.text, lineHeight: 1.55, marginTop: "0.7rem" }}>
+        Switch to <strong>Hard</strong> in the header to name the skill itself instead of the class.
+        Pick your difficulty before your first guess — it locks in for the day once you start.
+      </div>
+
       <div style={{ fontSize: "0.78rem", fontWeight: 600, color: theme.muted, lineHeight: 1.5, margin: "0.8rem 0 1rem" }}>
         Mapledle is part of MapleDoro, a free MapleStory community toolkit. Play this puzzle
         and find more tools on the web at mapledoro.com. Not affiliated with Nexon.

@@ -126,23 +126,6 @@ export default function SettingsDialog({
 
         <SettingRow
           theme={theme}
-          label="Hard Mode"
-          description="The skill icon starts blurred and sharpens with each guess, only fully clear on your last try."
-          control={
-            <PillToggle
-              theme={theme}
-              value={settings.hardMode ? "on" : "off"}
-              options={[
-                { value: "off", label: "Off" },
-                { value: "on", label: "On" },
-              ]}
-              onChange={(v) => onUpdateSettings({ hardMode: v === "on" })}
-            />
-          }
-        />
-
-        <SettingRow
-          theme={theme}
           label="Wipe Stats"
           description={
             wipeStage === "confirm"

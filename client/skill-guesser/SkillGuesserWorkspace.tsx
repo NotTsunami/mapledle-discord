@@ -2,8 +2,9 @@
   Port of mapledoro's SkillGuesserWorkspace for the Discord Activity.
   Differences from the web version: no next/link back-navigation (the activity
   is single-purpose), no SSR mount gate, an optional "Playing as" line for the
-  authenticated Discord user, settings/help dialogs, hard mode (progressive
-  icon blur), and Wordle-style rich presence updates.
+  authenticated Discord user, settings/help dialogs, a header difficulty toggle
+  (hard mode asks for the skill name instead of the class), and Wordle-style
+  rich presence updates.
 */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -14,6 +15,7 @@ import { toolStyles, type AppTheme } from "../theme";
 import { SKILL_GUESSER_CLASSES, findSkillGuesserClass } from "./classes";
 import {
   MAX_GUESSES,
+  allSkillNames,
   currentPuzzleNumber,
   getPuzzle,
   msUntilNextPuzzle,
@@ -32,24 +34,29 @@ import {
 const HIT_GREEN = "#2d8a2d";
 const MISS_RED = "#c44040";
 
-/* Hard mode: blur in px before any guess; reaches 0 on the final guess. */
-const HARD_MODE_MAX_BLUR = 7;
-
 /* ------------------------------------------------------------------ */
-/*  Class picker (searchable combobox over the answer pool)            */
+/*  Guess picker (searchable combobox over the answer pool)            */
 /* ------------------------------------------------------------------ */
 
-function ClassPicker({
+function GuessPicker({
   theme,
+  options,
   search,
   guessed,
+  placeholder,
+  ariaLabel,
+  emptyLabel,
   onSearchChange,
   onStage,
   onSubmit,
 }: {
   theme: AppTheme;
+  options: string[];
   search: string;
   guessed: Set<string>;
+  placeholder: string;
+  ariaLabel: string;
+  emptyLabel: string;
   onSearchChange: (v: string) => void;
   onStage: (name: string) => void;
   onSubmit: (name: string) => void;
@@ -67,9 +74,9 @@ function ClassPicker({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return SKILL_GUESSER_CLASSES;
-    return SKILL_GUESSER_CLASSES.filter((c) => c.name.toLowerCase().includes(q));
-  }, [search]);
+    if (!q) return options;
+    return options.filter((name) => name.toLowerCase().includes(q));
+  }, [search, options]);
 
   function pick(name: string) {
     onStage(name);
@@ -83,14 +90,14 @@ function ClassPicker({
     }
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const exact = filtered.find((c) => c.name.toLowerCase() === search.trim().toLowerCase());
-    if (exact && !guessed.has(exact.name)) {
+    const exact = filtered.find((name) => name.toLowerCase() === search.trim().toLowerCase());
+    if (exact && !guessed.has(exact)) {
       setOpen(false);
-      onSubmit(exact.name);
+      onSubmit(exact);
       return;
     }
-    const first = filtered.find((c) => !guessed.has(c.name));
-    if (first) pick(first.name);
+    const first = filtered.find((name) => !guessed.has(name));
+    if (first) pick(first);
   }
 
   const menuStyle: CSSProperties = {
@@ -114,10 +121,10 @@ function ClassPicker({
         type="text"
         role="combobox"
         aria-expanded={open}
-        aria-controls="sg-class-listbox"
-        aria-label="Guess a class"
+        aria-controls="sg-guess-listbox"
+        aria-label={ariaLabel}
         value={search}
-        placeholder="Search classes…"
+        placeholder={placeholder}
         className="tool-input"
         onChange={(e) => {
           onSearchChange(e.target.value);
@@ -128,23 +135,23 @@ function ClassPicker({
         style={{ ...toolStyles(theme).inputStyle, width: "100%", height: 40, boxSizing: "border-box" }}
       />
       {open && (
-        <div id="sg-class-listbox" role="listbox" style={menuStyle}>
+        <div id="sg-guess-listbox" role="listbox" style={menuStyle}>
           {filtered.length === 0 && (
             <div style={{ padding: 12, fontSize: "0.8rem", color: theme.muted, textAlign: "center" }}>
-              No classes found
+              {emptyLabel}
             </div>
           )}
-          {filtered.map((c) => {
-            const used = guessed.has(c.name);
+          {filtered.map((name) => {
+            const used = guessed.has(name);
             return (
               <button
-                key={c.name}
+                key={name}
                 type="button"
                 role="option"
-                aria-selected={search === c.name}
+                aria-selected={search === name}
                 className="sg-option"
                 disabled={used}
-                onClick={() => pick(c.name)}
+                onClick={() => pick(name)}
                 style={{
                   display: "block",
                   width: "100%",
@@ -160,7 +167,7 @@ function ClassPicker({
                   cursor: used ? "not-allowed" : "pointer",
                 }}
               >
-                {c.name}
+                {name}
               </button>
             );
           })}
@@ -283,10 +290,12 @@ function GameBoard({
   theme,
   puzzleNumber,
   hardMode,
+  onStarted,
 }: {
   theme: AppTheme;
   puzzleNumber: number;
   hardMode: boolean;
+  onStarted: () => void;
 }) {
   const puzzle = useMemo(() => getPuzzle(puzzleNumber), [puzzleNumber]);
   const styles = toolStyles(theme);
@@ -297,27 +306,29 @@ function GameBoard({
   const [staged, setStaged] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  // Hard mode scores against the skill name (picked from the skill pool);
+  // normal mode scores against the class name. Everything downstream — guess
+  // slots, squares, scoreboard marks, share text — keys off this one answer.
+  const answer = hardMode ? puzzle.skillName : puzzle.className;
+  const options = useMemo(
+    () => (hardMode ? allSkillNames() : SKILL_GUESSER_CLASSES.map((c) => c.name)),
+    [hardMode],
+  );
+
   const guessed = useMemo(() => new Set(result.guesses), [result.guesses]);
-  const failedCount = result.guesses.filter((g) => g !== puzzle.className).length;
+  const failedCount = result.guesses.filter((g) => g !== answer).length;
 
   // Wordle-style rich presence: board so far + which guess + session time.
   useEffect(() => {
     updateGameActivity({
       puzzleNumber,
-      squares: result.guesses.map((g) => (g === puzzle.className ? "🟩" : "🟥")).join(""),
+      squares: result.guesses.map((g) => (g === answer ? "🟩" : "🟥")).join(""),
       guessCount: result.guesses.length,
       maxGuesses: MAX_GUESSES,
       done: result.done,
       won: result.won,
     });
-  }, [puzzleNumber, puzzle.className, result]);
-
-  // Hard mode: fully blurred before the first guess, sharpening linearly so
-  // the icon is only fully clear on the last guess (or once the game ends).
-  const blurPx =
-    hardMode && !result.done
-      ? (HARD_MODE_MAX_BLUR * (MAX_GUESSES - 1 - result.guesses.length)) / (MAX_GUESSES - 1)
-      : 0;
+  }, [puzzleNumber, answer, result]);
 
   function handleSubmit(name?: string) {
     const guess = name ?? staged;
@@ -327,16 +338,18 @@ function GameBoard({
     setResult((prev) => {
       if (prev.done || prev.guesses.includes(guess)) return prev;
       const guesses = [...prev.guesses, guess];
-      const won = guess === puzzle.className;
+      const won = guess === answer;
       const next = { guesses, won, done: won || guesses.length >= MAX_GUESSES };
       writeSkillGuesserResult(puzzleNumber, next);
       return next;
     });
-    const finished = guess === puzzle.className || result.guesses.length + 1 >= MAX_GUESSES;
+    // Today's puzzle now has progress; let the workspace lock the mode toggle.
+    onStarted();
+    const finished = guess === answer || result.guesses.length + 1 >= MAX_GUESSES;
     if (finished) {
       // Feed the guild scoreboard card exactly once, at the finishing guess.
-      const marks = [...result.guesses, guess].map((g) => g === puzzle.className);
-      reportGameResult(puzzleNumber, guess === puzzle.className, marks);
+      const marks = [...result.guesses, guess].map((g) => g === answer);
+      reportGameResult(puzzleNumber, guess === answer, marks);
       setTimeout(() => setDialogOpen(true), 700);
     }
   }
@@ -362,19 +375,17 @@ function GameBoard({
               puzzle={puzzle}
               size={64}
               alt="Mystery skill icon"
-              style={{
-                imageRendering: "pixelated",
-                filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
-                transition: "filter 0.45s ease",
-              }}
+              style={{ imageRendering: "pixelated" }}
             />
           </div>
           <div style={{ fontSize: "0.85rem", fontWeight: 700, color: theme.text }}>
-            Which class learns this skill?
+            {hardMode ? "What is this skill called?" : "Which class learns this skill?"}
           </div>
           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: theme.muted }}>
             {result.done
-              ? `The answer was ${puzzle.className} — ${puzzle.skillName}`
+              ? hardMode
+                ? `The skill was ${puzzle.skillName} — ${puzzle.className}`
+                : `The answer was ${puzzle.className} — ${puzzle.skillName}`
               : `${MAX_GUESSES - result.guesses.length} of ${MAX_GUESSES} guesses remaining${hardMode ? " · Hard Mode" : ""}`}
           </div>
         </div>
@@ -385,10 +396,14 @@ function GameBoard({
           </div>
         ) : (
           <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.85rem", flexWrap: "wrap" }}>
-            <ClassPicker
+            <GuessPicker
               theme={theme}
+              options={options}
               search={search}
               guessed={guessed}
+              placeholder={hardMode ? "Search skills…" : "Search classes…"}
+              ariaLabel={hardMode ? "Guess a skill" : "Guess a class"}
+              emptyLabel={hardMode ? "No skills found" : "No classes found"}
               onSearchChange={(v) => {
                 setSearch(v);
                 setStaged(null);
@@ -410,7 +425,7 @@ function GameBoard({
         )}
 
         <div style={{ display: "grid", gap: "0.8rem" }}>
-          <GuessSlots theme={theme} guesses={result.guesses} answer={puzzle.className} />
+          <GuessSlots theme={theme} guesses={result.guesses} answer={answer} />
           <HintCards theme={theme} puzzle={puzzle} failedCount={failedCount} />
         </div>
       </div>
@@ -421,6 +436,7 @@ function GameBoard({
           puzzleNumber={puzzleNumber}
           puzzle={puzzle}
           result={result}
+          answer={answer}
           onClose={() => setDialogOpen(false)}
         />
       )}
@@ -470,6 +486,67 @@ function HeaderIconButton({
   );
 }
 
+/** Segmented Normal / Hard selector that sits in the header, left of the icons. */
+function ModeToggle({
+  theme,
+  hardMode,
+  disabled,
+  onChange,
+}: {
+  theme: AppTheme;
+  hardMode: boolean;
+  disabled: boolean;
+  onChange: (hard: boolean) => void;
+}) {
+  const options: { hard: boolean; label: string }[] = [
+    { hard: false, label: "Normal" },
+    { hard: true, label: "Hard" },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="Difficulty"
+      title={disabled ? "Finish today's puzzle to switch difficulty" : undefined}
+      style={{
+        display: "flex",
+        height: 34,
+        padding: 2,
+        borderRadius: 17,
+        border: `1px solid ${theme.border}`,
+        background: theme.panel,
+        opacity: disabled ? 0.55 : 1,
+        flexShrink: 0,
+      }}
+    >
+      {options.map((o) => {
+        const active = o.hard === hardMode;
+        return (
+          <button
+            key={o.label}
+            type="button"
+            className="tool-btn"
+            aria-pressed={active}
+            disabled={disabled}
+            onClick={() => !active && onChange(o.hard)}
+            style={{
+              border: "none",
+              borderRadius: 15,
+              padding: "0 0.7rem",
+              fontSize: "0.72rem",
+              fontWeight: 800,
+              cursor: disabled ? "not-allowed" : "pointer",
+              background: active ? theme.accentSoft : "transparent",
+              color: active ? theme.accentText : theme.muted,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SkillGuesserWorkspace({
   theme,
   playerName,
@@ -486,6 +563,16 @@ export default function SkillGuesserWorkspace({
   const [helpOpen, setHelpOpen] = useState(false);
   // Bumped when stats are wiped so the board remounts from empty storage.
   const [resetTick, setResetTick] = useState(0);
+  // Bumped after each guess so `started` re-reads storage and locks the toggle.
+  const [progressTick, setProgressTick] = useState(0);
+
+  // Once today's puzzle has any guesses, lock the difficulty toggle: the stored
+  // guesses are scored against one answer key (skill vs class), so switching
+  // mid-game would mismatch every prior guess. It frees up on the next puzzle.
+  const started = useMemo(
+    () => (readSkillGuesserResult(puzzleNumber)?.guesses.length ?? 0) > 0,
+    [puzzleNumber, resetTick, progressTick],
+  );
 
   // Move to the next puzzle when the UTC day rolls over while the activity is open.
   useEffect(() => {
@@ -516,7 +603,13 @@ export default function SkillGuesserWorkspace({
               ) : null}
             </div>
           </div>
-          <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.5rem" }}>
+            <ModeToggle
+              theme={theme}
+              hardMode={settings.hardMode}
+              disabled={started}
+              onChange={(hard) => onUpdateSettings({ hardMode: hard })}
+            />
             <HeaderIconButton theme={theme} label="How to play" onClick={() => setHelpOpen(true)}>
               ?
             </HeaderIconButton>
@@ -527,10 +620,11 @@ export default function SkillGuesserWorkspace({
         </div>
 
         <GameBoard
-          key={`${puzzleNumber}:${resetTick}`}
+          key={`${puzzleNumber}:${resetTick}:${settings.hardMode ? "h" : "n"}`}
           theme={theme}
           puzzleNumber={puzzleNumber}
           hardMode={settings.hardMode}
+          onStarted={() => setProgressTick((n) => n + 1)}
         />
 
         {settingsOpen && (

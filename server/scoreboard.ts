@@ -65,8 +65,10 @@ const C = {
   miss: "#c44040",
 };
 
-// CJK and emoji families are listed so names resolve to a font that has those glyphs;
-// @napi-rs/canvas also falls back per-glyph across loaded system fonts.
+// CJK and emoji families are listed explicitly so those names pick the right font
+// (Han disambiguation, color emoji); every other script (Arabic, Thai, Sinhala, …)
+// is covered by font-noto-all and resolves via @napi-rs/canvas's per-glyph fallback
+// across loaded system fonts — see the Dockerfile.
 const FONT =
   '"DejaVu Sans", "Noto Sans CJK SC", "Noto Sans CJK", "Noto Color Emoji", "Noto Emoji", "Segoe UI", sans-serif';
 const WIDTH = 640;

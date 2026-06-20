@@ -9,12 +9,12 @@ const SHARE_URL = "https://www.mapledoro.com/games/skill-guesser";
 
 function buildShareText(
   puzzleNumber: number,
-  puzzle: SkillGuesserPuzzle,
+  answer: string,
   result: SkillGuesserResult,
 ): string {
   const score = result.won ? `${result.guesses.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
   const squares = result.guesses
-    .map((g) => (g === puzzle.className ? "\u{1F7E9}" : "\u{1F7E5}"))
+    .map((g) => (g === answer ? "\u{1F7E9}" : "\u{1F7E5}"))
     .join("");
   return `Mapledle #${puzzleNumber} ${score}\n${squares}\n${SHARE_URL}`;
 }
@@ -92,12 +92,15 @@ export default function ResultsDialog({
   puzzleNumber,
   puzzle,
   result,
+  answer,
   onClose,
 }: {
   theme: AppTheme;
   puzzleNumber: number;
   puzzle: SkillGuesserPuzzle;
   result: SkillGuesserResult;
+  /** The value guesses are scored against (skill name in hard mode, else class). */
+  answer: string;
   onClose: () => void;
 }) {
   const styles = toolStyles(theme);
@@ -105,7 +108,7 @@ export default function ResultsDialog({
   // we then reveal the text pre-selected for a manual Ctrl+C.
   const [shareState, setShareState] = useState<"idle" | "copied" | "manual">("idle");
   const manualRef = useRef<HTMLTextAreaElement>(null);
-  const shareText = buildShareText(puzzleNumber, puzzle, result);
+  const shareText = buildShareText(puzzleNumber, answer, result);
 
   useEffect(() => {
     if (shareState !== "copied") return;
@@ -212,7 +215,7 @@ export default function ResultsDialog({
 
         <div style={{ fontSize: "1.3rem", letterSpacing: "0.15em", marginBottom: "1.1rem" }} aria-hidden="true">
           {result.guesses.map((g, i) => (
-            <span key={i}>{g === puzzle.className ? "\u{1F7E9}" : "\u{1F7E5}"}</span>
+            <span key={i}>{g === answer ? "\u{1F7E9}" : "\u{1F7E5}"}</span>
           ))}
         </div>
 
