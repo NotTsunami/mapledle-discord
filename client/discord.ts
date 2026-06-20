@@ -69,7 +69,12 @@ export async function setupDiscord(): Promise<DiscordUser | null> {
  * card (the message the server posts/edits in the launch channel). Fire and
  * forget; no-op outside a guild voice/text context.
  */
-export function reportGameResult(puzzleNumber: number, won: boolean, marks: boolean[]): void {
+export function reportGameResult(
+  puzzleNumber: number,
+  won: boolean,
+  hardMode: boolean,
+  marks: boolean[],
+): void {
   if (!activeSdk || !authUser) return;
   const { guildId, channelId } = activeSdk;
   if (!guildId || !channelId) return;
@@ -79,6 +84,7 @@ export function reportGameResult(puzzleNumber: number, won: boolean, marks: bool
     body: JSON.stringify({
       puzzleNumber,
       won,
+      hardMode,
       marks,
       guildId,
       channelId,

@@ -138,6 +138,23 @@ function drawAvatar(ctx: SKRSContext2D, img: Image | null, name: string, x: numb
   ctx.restore();
 }
 
+/** Small accent pill marking a hard-mode result. Returns its drawn width. */
+function drawHardBadge(ctx: SKRSContext2D, x: number, centerY: number): number {
+  const label = "HARD";
+  ctx.font = `bold 10px ${FONT}`;
+  const padX = 6;
+  const h = 16;
+  const w = ctx.measureText(label).width + padX * 2;
+  ctx.fillStyle = C.accent;
+  roundRect(ctx, x, centerY - h / 2, w, h, 4);
+  ctx.fill();
+  ctx.fillStyle = C.bg;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + padX, centerY + 1);
+  return w;
+}
+
 function drawGuessRow(ctx: SKRSContext2D, marks: boolean[], rightX: number, centerY: number): void {
   const cell = 22;
   const gap = 5;
@@ -226,7 +243,13 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
     ctx.textBaseline = "middle";
     ctx.fillStyle = C.text;
     ctx.font = `bold 15px ${FONT}`;
-    ctx.fillText(truncate(ctx, p.name, 280), PAD + 58, y + ROW_H / 2 + 1);
+    // Reserve room for the HARD badge so a long name can't run into it.
+    const nameX = PAD + 58;
+    const name = truncate(ctx, p.name, p.hardMode ? 230 : 280);
+    ctx.fillText(name, nameX, y + ROW_H / 2 + 1);
+    if (p.hardMode) {
+      drawHardBadge(ctx, nameX + ctx.measureText(name).width + 8, y + ROW_H / 2);
+    }
 
     const score = p.won ? `${p.marks.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
     ctx.textAlign = "right";

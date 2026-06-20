@@ -349,7 +349,7 @@ function GameBoard({
     if (finished) {
       // Feed the guild scoreboard card exactly once, at the finishing guess.
       const marks = [...result.guesses, guess].map((g) => g === answer);
-      reportGameResult(puzzleNumber, guess === answer, marks);
+      reportGameResult(puzzleNumber, guess === answer, hardMode, marks);
       setTimeout(() => setDialogOpen(true), 700);
     }
   }

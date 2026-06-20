@@ -188,6 +188,7 @@ function handleResult(req: Request, res: Response): void {
   const b = req.body as {
     puzzleNumber?: unknown;
     won?: unknown;
+    hardMode?: unknown;
     marks?: unknown;
     guildId?: unknown;
     channelId?: unknown;
@@ -201,6 +202,7 @@ function handleResult(req: Request, res: Response): void {
     typeof day === "number" &&
     Number.isInteger(day) &&
     typeof b.won === "boolean" &&
+    typeof b.hardMode === "boolean" &&
     Array.isArray(marks) &&
     marks.length >= 1 &&
     marks.length <= MAX_GUESSES &&
@@ -240,6 +242,7 @@ function handleResult(req: Request, res: Response): void {
       name: name.slice(0, 40),
       avatar: (user.avatar as string | null) ?? null,
       won: b.won as boolean,
+      hardMode: b.hardMode as boolean,
       marks: marks as boolean[],
       at: Date.now(),
     },

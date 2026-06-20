@@ -14,6 +14,8 @@ export interface PlayerResult {
   /** Avatar hash, or null for the default avatar. */
   avatar: string | null;
   won: boolean;
+  /** Solved against the skill name (hard) rather than the class name. */
+  hardMode: boolean;
   /** Per-guess hit/miss, in order. */
   marks: boolean[];
   /** Finish time (ms epoch), used for row ordering. */
