@@ -10,9 +10,11 @@
   start a fresh card rather than touching the old one (cards are keyed by
   puzzle number).
 
-  Rendering uses @napi-rs/canvas; the guess squares are drawn as rects. Names
-  can contain CJK characters and emoji, so the container ships font-dejavu
-  (Latin), font-noto-cjk (CJK), and font-noto-emoji (emoji) — see the Dockerfile.
+  Rendering uses @napi-rs/canvas; the guess squares are drawn as rects. Names can
+  contain many scripts and emoji, so the container ships font-dejavu (Latin),
+  font-noto-all (other scripts), font-noto-cjk (CJK), and font-noto-emoji (emoji).
+  Each script we render must be named in FONT below — see that comment and the
+  Dockerfile.
 */
 
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
@@ -65,12 +67,15 @@ const C = {
   miss: "#c44040",
 };
 
-// CJK and emoji families are listed explicitly so those names pick the right font
-// (Han disambiguation, color emoji); every other script (Arabic, Thai, Sinhala, …)
-// is covered by font-noto-all and resolves via @napi-rs/canvas's per-glyph fallback
-// across loaded system fonts — see the Dockerfile.
+// @napi-rs/canvas only falls back across the families named here — it does NOT
+// reach into unlisted system fonts for a missing glyph. So every script we want to
+// render in display names has to be named explicitly, even though font-noto-all
+// installs them all. Each Noto Sans <script> family covers a disjoint Unicode block,
+// so per-glyph fallback walks the list and picks the one that has the glyph. Add more
+// "Noto Sans <Script>" entries (and the matching package in the Dockerfile) to widen
+// coverage. The fonts are installed via font-noto-all/-cjk/-emoji — see the Dockerfile.
 const FONT =
-  '"DejaVu Sans", "Noto Sans CJK SC", "Noto Sans CJK", "Noto Color Emoji", "Noto Emoji", "Segoe UI", sans-serif';
+  '"DejaVu Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai", "Noto Sans Sinhala", "Noto Sans CJK SC", "Noto Sans CJK", "Noto Color Emoji", "Noto Emoji", "Segoe UI", sans-serif';
 const WIDTH = 640;
 const PAD = 24;
 const HEADER_H = 86;
