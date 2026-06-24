@@ -7,6 +7,14 @@
 :root {
   --font-body: "Nunito", "Segoe UI", system-ui, sans-serif;
   --font-heading: "Fredoka", var(--font-body);
+
+  /* Safe-area insets. Discord's mobile client publishes --discord-safe-area-inset-*
+     which (unlike the OS env() values) accounts for its own grabber bar and top
+     overlay; fall back to env() for iOS notch + local/web dev outside Discord. */
+  --sait: var(--discord-safe-area-inset-top, env(safe-area-inset-top));
+  --saib: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom));
+  --sail: var(--discord-safe-area-inset-left, env(safe-area-inset-left));
+  --sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right));
 }
 
 * {
@@ -45,11 +53,11 @@ body {
 .page-content {
   width: 100%;
   /* Pad the content out of Discord's mobile chrome (grabber/status bar) and any
-     device notch. env(safe-area-inset-*) is 0 unless the viewport opts in with
-     viewport-fit=cover, so on desktop/web this is just the base padding. */
+     device notch via the safe-area insets defined on :root. The insets resolve
+     to 0 on desktop/web, leaving just the base padding. */
   padding:
-    calc(1rem + env(safe-area-inset-top)) calc(1.5rem + env(safe-area-inset-right))
-    calc(1.25rem + env(safe-area-inset-bottom)) calc(1.5rem + env(safe-area-inset-left));
+    calc(1rem + var(--sait)) calc(1.5rem + var(--sair))
+    calc(1.25rem + var(--saib)) calc(1.5rem + var(--sail));
 }
 
 .tool-container {
@@ -122,7 +130,7 @@ input:focus-visible {
 @media (max-width: 700px) {
   .page-content {
     padding:
-      calc(0.75rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right))
-      calc(1rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left));
+      calc(0.75rem + var(--sait)) calc(1rem + var(--sair))
+      calc(1rem + var(--saib)) calc(1rem + var(--sail));
   }
 }
