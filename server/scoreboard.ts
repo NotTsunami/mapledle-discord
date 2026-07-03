@@ -76,11 +76,18 @@ const C = {
 // coverage. The fonts are installed via font-noto-all/-cjk/-emoji — see the Dockerfile.
 const FONT =
   '"DejaVu Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai", "Noto Sans Sinhala", "Noto Sans CJK SC", "Noto Sans CJK", "Noto Color Emoji", "Noto Emoji", "Segoe UI", sans-serif';
-const WIDTH = 640;
 const PAD = 24;
+const COL_GAP = 16;
+// Per-column content width; a single-column card is PAD + COL_W + PAD = 640 wide.
+const COL_W = 592;
 const HEADER_H = 86;
 const ROW_H = 52;
-const MAX_ROWS = 10;
+const ROW_GAP = 8;
+// Past this many players we switch to a two-column card; MAX_ROWS is the cap
+// across both columns before the "+N more" footer kicks in.
+const ONE_COL_MAX = 10;
+const PER_COL_MAX = 12;
+const MAX_ROWS = PER_COL_MAX * 2;
 
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
   ctx.beginPath();
@@ -185,6 +192,41 @@ export interface PlayerRow extends PlayerResult {
   userId: string;
 }
 
+/** Draw one player row inside a column whose left edge is `colX`, width COL_W. */
+function drawRow(ctx: SKRSContext2D, p: PlayerRow, avatar: Image | null, colX: number, y: number): void {
+  const rightX = colX + COL_W;
+
+  ctx.fillStyle = C.rowBg;
+  roundRect(ctx, colX, y, COL_W, ROW_H, 10);
+  ctx.fill();
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1;
+  roundRect(ctx, colX + 0.5, y + 0.5, COL_W - 1, ROW_H - 1, 10);
+  ctx.stroke();
+
+  drawAvatar(ctx, avatar, p.name, colX + 10, y + (ROW_H - 36) / 2, 36);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = C.text;
+  ctx.font = `bold 15px ${FONT}`;
+  // Reserve room for the HARD badge so a long name can't run into it.
+  const nameX = colX + 58;
+  const name = truncate(ctx, p.name, p.hardMode ? 230 : 280);
+  ctx.fillText(name, nameX, y + ROW_H / 2 + 1);
+  if (p.hardMode) {
+    drawHardBadge(ctx, nameX + ctx.measureText(name).width + 8, y + ROW_H / 2);
+  }
+
+  const score = p.won ? `${p.marks.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
+  ctx.textAlign = "right";
+  ctx.fillStyle = p.won ? C.text : C.muted;
+  ctx.font = `bold 14px ${FONT}`;
+  ctx.fillText(score, rightX - 12, y + ROW_H / 2 + 1);
+
+  drawGuessRow(ctx, p.marks, rightX - 56, y + ROW_H / 2);
+}
+
 /** Exported for scripts/preview-scoreboard.mjs. */
 export async function renderScoreboard(day: number, players: PlayerRow[], final = false): Promise<Buffer> {
   const sorted = [...players].sort((a, b) => {
@@ -195,15 +237,21 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
   const rows = sorted.slice(0, MAX_ROWS);
   const overflow = sorted.length - rows.length;
 
-  const bodyH = rows.length > 0 ? rows.length * (ROW_H + 8) - 8 : 48;
+  // One column normally; spill into a second column once the board gets busy so
+  // the card stays a sensible shape instead of a very tall strip.
+  const cols = rows.length > ONE_COL_MAX ? 2 : 1;
+  const perCol = Math.ceil(rows.length / cols);
+  const width = PAD + cols * COL_W + (cols - 1) * COL_GAP + PAD;
+
+  const bodyH = perCol > 0 ? perCol * (ROW_H + ROW_GAP) - ROW_GAP : 48;
   const footerH = overflow > 0 ? 30 : 0;
   const height = HEADER_H + bodyH + footerH + PAD;
 
-  const canvas = createCanvas(WIDTH, height);
+  const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
 
   ctx.fillStyle = C.bg;
-  ctx.fillRect(0, 0, WIDTH, height);
+  ctx.fillRect(0, 0, width, height);
 
   // Header
   ctx.textBaseline = "alphabetic";
@@ -225,44 +273,18 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
     ctx.fillStyle = C.text;
     ctx.font = `bold 16px ${FONT}`;
     ctx.textAlign = "center";
-    ctx.fillText("No results yet — be the first to solve it!", WIDTH / 2, HEADER_H + 26);
+    ctx.fillText("No results yet — be the first to solve it!", width / 2, HEADER_H + 26);
     return canvas.encode("png");
   }
 
   const avatars = await Promise.all(rows.map((p) => fetchAvatar(p.userId, p.avatar)));
 
   rows.forEach((p, i) => {
-    const y = HEADER_H + i * (ROW_H + 8);
-
-    ctx.fillStyle = C.rowBg;
-    roundRect(ctx, PAD, y, WIDTH - PAD * 2, ROW_H, 10);
-    ctx.fill();
-    ctx.strokeStyle = C.border;
-    ctx.lineWidth = 1;
-    roundRect(ctx, PAD + 0.5, y + 0.5, WIDTH - PAD * 2 - 1, ROW_H - 1, 10);
-    ctx.stroke();
-
-    drawAvatar(ctx, avatars[i] ?? null, p.name, PAD + 10, y + (ROW_H - 36) / 2, 36);
-
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = C.text;
-    ctx.font = `bold 15px ${FONT}`;
-    // Reserve room for the HARD badge so a long name can't run into it.
-    const nameX = PAD + 58;
-    const name = truncate(ctx, p.name, p.hardMode ? 230 : 280);
-    ctx.fillText(name, nameX, y + ROW_H / 2 + 1);
-    if (p.hardMode) {
-      drawHardBadge(ctx, nameX + ctx.measureText(name).width + 8, y + ROW_H / 2);
-    }
-
-    const score = p.won ? `${p.marks.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
-    ctx.textAlign = "right";
-    ctx.fillStyle = p.won ? C.text : C.muted;
-    ctx.font = `bold 14px ${FONT}`;
-    ctx.fillText(score, WIDTH - PAD - 12, y + ROW_H / 2 + 1);
-
-    drawGuessRow(ctx, p.marks, WIDTH - PAD - 56, y + ROW_H / 2);
+    const col = Math.floor(i / perCol);
+    const rowInCol = i % perCol;
+    const colX = PAD + col * (COL_W + COL_GAP);
+    const y = HEADER_H + rowInCol * (ROW_H + ROW_GAP);
+    drawRow(ctx, p, avatars[i] ?? null, colX, y);
   });
 
   if (overflow > 0) {

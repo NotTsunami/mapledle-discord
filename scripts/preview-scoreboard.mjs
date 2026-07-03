@@ -27,6 +27,21 @@ const players = [
   fake("80351110224678914", "xXLuminousXx", [false, false, false, false, false], 10),
 ];
 
+// A busy day that spills into the two-column layout.
+const bigDay = [
+  ...players,
+  fake("80351110224678915", "Kanna Kai", [false, false, true], 48),
+  fake("80351110224678916", "Phantom Phil", [false, true], 46, true),
+  fake("80351110224678917", "Aran Andy", [true], 40),
+  fake("80351110224678918", "Evan the Dragon", [false, false, false, true], 38),
+  fake("80351110224678919", "Mercedes Mia", [false, false, true], 33, true),
+  fake("80351110224678920", "Shade Sam", [false, false, false, false, true], 28),
+  fake("80351110224678921", "blaster_bob", [false, false, false, false, false], 24),
+  fake("80351110224678922", "Night Lord Nia", [false, true], 18),
+  fake("80351110224678923", "Battle Mage Bea", [false, false, true], 12, true),
+  fake("80351110224678924", "Wild Hunter Wes", [false, false, false, true], 6),
+];
+
 const png = await renderScoreboard(42, players);
 fs.writeFileSync("scoreboard-preview.png", png);
 console.log(`Wrote scoreboard-preview.png (${png.length} bytes)`);
@@ -34,3 +49,7 @@ console.log(`Wrote scoreboard-preview.png (${png.length} bytes)`);
 const finalPng = await renderScoreboard(42, players, true);
 fs.writeFileSync("scoreboard-preview-final.png", finalPng);
 console.log(`Wrote scoreboard-preview-final.png (${finalPng.length} bytes)`);
+
+const bigPng = await renderScoreboard(42, bigDay, true);
+fs.writeFileSync("scoreboard-preview-big.png", bigPng);
+console.log(`Wrote scoreboard-preview-big.png (${bigPng.length} bytes)`);
