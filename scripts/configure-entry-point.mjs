@@ -4,14 +4,18 @@
      (Discord posts its stock "Join" card) to APP_HANDLER (Discord sends the
      launch interaction to our /interactions endpoint, which launches the
      activity AND posts the custom scoreboard card).
-  2. Register the /start slash command (Wordle-style), which launches the
-     activity the same way.
+  2. Register the /skill, /bgm and /help slash commands, and remove the old
+     single /start command the first two replace.
+
+  Safe to re-run: it only creates what's missing.
 
   Usage: npm run configure-entry-point   (needs DISCORD_BOT_TOKEN in .env)
 
-  Remember to also set the Interactions Endpoint URL in the Developer Portal
-  (General Information) to https://<your-activity-host>/interactions — Discord
-  verifies it with a PING when you save, so deploy the new server first.
+  Remember to also set, in the Developer Portal, the Interactions Endpoint URL
+  (General Information) to https://<your-activity-host>/interactions and the
+  Event Webhooks URL (Webhooks) to https://<your-activity-host>/webhook-events
+  with the Application Authorized event enabled. Discord verifies both with a
+  PING when you save, so deploy the new server first.
 */
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -28,6 +32,17 @@ const CHAT_INPUT = 1;
 const PRIMARY_ENTRY_POINT = 4;
 const APP_HANDLER = 1;
 
+// `skill` and `bgm` are the names the server maps to games (see server/games.ts);
+// `help` is answered with the explainer from server/messages.ts.
+const COMMANDS = [
+  { name: "skill", description: "Play today's Mapledle skill puzzle" },
+  { name: "bgm", description: "Play today's BGM Guesser puzzle" },
+  { name: "help", description: "How the MapleDoro games work" },
+];
+
+// Replaced by the two per-game commands above.
+const RETIRED_COMMANDS = ["start"];
+
 async function api(method, path, body) {
   const res = await fetch(`${API}${path}`, {
     method,
@@ -37,7 +52,7 @@ async function api(method, path, body) {
   if (!res.ok) {
     throw new Error(`${method} ${path} -> ${res.status}: ${await res.text()}`);
   }
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
 const appInfo = await api("GET", "/applications/@me");
@@ -65,22 +80,34 @@ if (entryPoint) {
   console.log(`Created Entry Point command "${created.name}" with APP_HANDLER.`);
 }
 
-const startCommand = commands.find((c) => c.type === CHAT_INPUT && c.name === "start");
-if (startCommand) {
-  console.log(`/start command already registered — nothing to do.`);
-} else {
+for (const command of COMMANDS) {
+  if (commands.some((c) => c.type === CHAT_INPUT && c.name === command.name)) {
+    console.log(`/${command.name} command already registered — nothing to do.`);
+    continue;
+  }
   await api("POST", `/applications/${appInfo.id}/commands`, {
-    name: "start",
-    description: "Play today's Mapledle",
+    ...command,
     type: CHAT_INPUT,
     integration_types: [0, 1], // guild + user install
     contexts: [0, 1, 2], // guild, bot DM, private channel
   });
-  console.log(`Registered the /start command.`);
+  console.log(`Registered the /${command.name} command.`);
+}
+
+for (const name of RETIRED_COMMANDS) {
+  const stale = commands.find((c) => c.type === CHAT_INPUT && c.name === name);
+  if (!stale) continue;
+  await api("DELETE", `/applications/${appInfo.id}/commands/${stale.id}`);
+  console.log(`Removed the retired /${name} command.`);
 }
 
 console.log(
-  "\nNext: in the Developer Portal -> General Information, set\n" +
-    "  Interactions Endpoint URL = https://<your-activity-host>/interactions\n" +
-    "(the new server must be deployed first — Discord PINGs it on save).",
+  "\nNext, in the Developer Portal (the new server must be deployed first —\n" +
+    "Discord PINGs both when you save):\n" +
+    "  General Information -> Interactions Endpoint URL\n" +
+    "      = https://<your-activity-host>/interactions\n" +
+    "  Webhooks -> Event Webhooks URL\n" +
+    "      = https://<your-activity-host>/webhook-events\n" +
+    "      and subscribe to the Application Authorized event, so the app can\n" +
+    "      introduce itself when someone adds it to a server.",
 );

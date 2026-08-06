@@ -8,6 +8,7 @@
 */
 
 import { DiscordSDK } from "@discord/embedded-app-sdk";
+import { isGameMode, type GameMode } from "./games";
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID as string;
 
@@ -64,16 +65,54 @@ export async function setupDiscord(): Promise<DiscordUser | null> {
   return auth.user;
 }
 
+/*
+  Which game the launch asked for.
+
+  LAUNCH_ACTIVITY interaction responses carry no payload, so `/skill` and
+  `/bgm` can't hand the mode to the iframe directly. Two signals fill the gap:
+
+  1. `custom_id` — set by Discord on activity links
+     (https://discord.com/activities/<app id>?custom_id=bgm) and readable before
+     the handshake completes.
+  2. The server's short-lived pending-mode note, written when it answers the
+     slash command or scoreboard button and claimed here by user id.
+
+  Neither is guaranteed (the App Launcher's Entry Point command sets neither), so
+  callers fall back to the last game the player was in.
+*/
+export function launchModeFromCustomId(): GameMode | null {
+  const raw = new URLSearchParams(window.location.search).get("custom_id");
+  return isGameMode(raw) ? raw : null;
+}
+
+/** Claims the pending mode the server recorded for this user, if any. */
+export async function fetchLaunchMode(): Promise<GameMode | null> {
+  if (!authUser) return null;
+  try {
+    const res = await fetch("/.proxy/api/launch-mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: authUser.id }),
+    });
+    if (!res.ok) return null;
+    const { mode } = (await res.json()) as { mode?: unknown };
+    return isGameMode(mode) ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Reports a finished puzzle so the player appears on the guild's scoreboard
+ * Reports a finished puzzle so the player appears on that game's scoreboard
  * card (the message the server posts/edits in the launch channel). Fire and
  * forget; no-op outside a guild voice/text context.
  */
 export function reportGameResult(
+  mode: GameMode,
   puzzleNumber: number,
   won: boolean,
-  hardMode: boolean,
   marks: boolean[],
+  hardMode = false,
 ): void {
   if (!activeSdk || !authUser) return;
   const { guildId, channelId } = activeSdk;
@@ -82,6 +121,7 @@ export function reportGameResult(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      mode,
       puzzleNumber,
       won,
       hardMode,
@@ -99,6 +139,8 @@ export function reportGameResult(
 }
 
 export interface GameActivity {
+  /** Display name of the game being played, e.g. "Mapledle". */
+  game: string;
   puzzleNumber: number;
   /** Wordle-style row of the guesses made so far, e.g. "🟥🟩". */
   squares: string;
@@ -109,8 +151,8 @@ export interface GameActivity {
 }
 
 /**
- * Rich presence: instead of the bare "playing Skill Guesser" card, show the
- * Wordle-style board, which guess the player is on, and session time elapsed.
+ * Rich presence: instead of the bare "playing Mapledle" card, show which game,
+ * the Wordle-style board, which guess the player is on, and session time.
  */
 export function updateGameActivity(a: GameActivity): void {
   if (!activeSdk) return;
@@ -124,7 +166,9 @@ export function updateGameActivity(a: GameActivity): void {
     .setActivity({
       activity: {
         type: 0, // Playing
-        details: board ? `Mapledle #${a.puzzleNumber} ${board}` : `Mapledle #${a.puzzleNumber}`,
+        details: board
+          ? `${a.game} #${a.puzzleNumber} ${board}`
+          : `${a.game} #${a.puzzleNumber}`,
         state,
         timestamps: { start: SESSION_START_MS },
       },

@@ -1,7 +1,7 @@
 /*
-  Renders a sample scoreboard card to scoreboard-preview.png (and the
-  end-of-day variant to scoreboard-preview-final.png) so the layout can be
-  checked without launching the activity in Discord.
+  Renders sample scoreboard cards for both games to PNGs (plus the end-of-day
+  variants) so the layouts can be checked without launching the activity in
+  Discord.
 
   Usage: node scripts/preview-scoreboard.mjs
 */
@@ -19,7 +19,7 @@ const fake = (userId, name, marks, minutesAgo, hardMode = false) => ({
   at: Date.now() - minutesAgo * 60_000,
 });
 
-const players = [
+const skillPlayers = [
   fake("80351110224678912", "Shrek Enthusiast", [false, true], 50),
   fake("155149108183695360", "DawnWarrior Dan", [true], 44, true),
   fake("297045071102261248", "bishop_betty", [false, false, true], 30),
@@ -29,7 +29,7 @@ const players = [
 
 // A busy day that spills into the two-column layout.
 const bigDay = [
-  ...players,
+  ...skillPlayers,
   fake("80351110224678915", "Kanna Kai", [false, false, true], 48),
   fake("80351110224678916", "Phantom Phil", [false, true], 46, true),
   fake("80351110224678917", "Aran Andy", [true], 40),
@@ -42,14 +42,23 @@ const bigDay = [
   fake("80351110224678924", "Wild Hunter Wes", [false, false, false, true], 6),
 ];
 
-const png = await renderScoreboard(42, players);
-fs.writeFileSync("scoreboard-preview.png", png);
-console.log(`Wrote scoreboard-preview.png (${png.length} bytes)`);
+// The BGM Guesser allows 3 guesses and has no hard mode.
+const bgmPlayers = [
+  fake("80351110224678912", "Shrek Enthusiast", [false, true], 47),
+  fake("155149108183695360", "DawnWarrior Dan", [true], 41),
+  fake("297045071102261248", "bishop_betty", [false, false, true], 27),
+  fake("80351110224678914", "xXLuminousXx", [false, false, false], 9),
+];
 
-const finalPng = await renderScoreboard(42, players, true);
-fs.writeFileSync("scoreboard-preview-final.png", finalPng);
-console.log(`Wrote scoreboard-preview-final.png (${finalPng.length} bytes)`);
+const outputs = [
+  ["scoreboard-preview.png", await renderScoreboard("skill", 42, skillPlayers)],
+  ["scoreboard-preview-final.png", await renderScoreboard("skill", 42, skillPlayers, true)],
+  ["scoreboard-preview-big.png", await renderScoreboard("skill", 42, bigDay, true)],
+  ["scoreboard-preview-bgm.png", await renderScoreboard("bgm", 7, bgmPlayers)],
+  ["scoreboard-preview-bgm-final.png", await renderScoreboard("bgm", 7, bgmPlayers, true)],
+];
 
-const bigPng = await renderScoreboard(42, bigDay, true);
-fs.writeFileSync("scoreboard-preview-big.png", bigPng);
-console.log(`Wrote scoreboard-preview-big.png (${bigPng.length} bytes)`);
+for (const [file, png] of outputs) {
+  fs.writeFileSync(file, png);
+  console.log(`Wrote ${file} (${png.length} bytes)`);
+}

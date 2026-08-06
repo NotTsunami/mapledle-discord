@@ -1,22 +1,34 @@
+/*
+  Port of mapledoro's BGM Guesser ResultsDialog. Differences from the web
+  version: the manual-copy fallback for Discord clients that block the
+  clipboard, and condensed lifetime stats (the activity has no stats panel on
+  the main view).
+*/
+
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import MarkIcon from "../components/MarkIcon";
 import ModalShell from "../components/ModalShell";
 import { toolStyles, type AppTheme } from "../theme";
-import PuzzleSkillIcon from "./PuzzleSkillIcon";
-import { MAX_GUESSES, msUntilNextPuzzle, type SkillGuesserPuzzle } from "./puzzles";
-import { computeSkillGuesserStats, type SkillGuesserResult } from "./storage";
+import {
+  MAX_GUESSES,
+  findBgmGuesserAnswer,
+  msUntilNextPuzzle,
+  type BgmGuesserPuzzle,
+} from "./puzzles";
+import { computeBgmGuesserStats, type BgmGuesserResult } from "./storage";
 
-const SHARE_URL = "https://www.mapledoro.com/games/skill-guesser";
+const SHARE_URL = "https://www.mapledoro.com/games/bgm-guesser";
 
 function buildShareText(
   puzzleNumber: number,
   answer: string,
-  result: SkillGuesserResult,
+  result: BgmGuesserResult,
 ): string {
   const score = result.won ? `${result.guesses.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
   const squares = result.guesses
     .map((g) => (g === answer ? "\u{1F7E9}" : "\u{1F7E5}"))
     .join("");
-  return `Mapledle #${puzzleNumber} ${score}\n${squares}\n${SHARE_URL}`;
+  return `BGM Guesser #${puzzleNumber} ${score}\n${squares}\n${SHARE_URL}`;
 }
 
 function formatCountdown(ms: number): string {
@@ -48,7 +60,7 @@ function NextPuzzleCountdown({ theme }: { theme: AppTheme }) {
 
 /** Condensed lifetime stats (the full panel was dropped from the main view). */
 function MiniStats({ theme }: { theme: AppTheme }) {
-  const stats = useMemo(() => computeSkillGuesserStats(), []);
+  const stats = useMemo(() => computeBgmGuesserStats(), []);
   const items = [
     { label: "Played", value: String(stats.played) },
     { label: "Win Rate", value: `${stats.winRate}%` },
@@ -87,20 +99,27 @@ const revealIconFrame: CSSProperties = {
   flexShrink: 0,
 };
 
+const revealCard: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.85rem",
+  margin: "1.1rem 0",
+  padding: "0.85rem 1rem",
+  borderRadius: 12,
+  textAlign: "left",
+};
+
 export default function ResultsDialog({
   theme,
   puzzleNumber,
   puzzle,
   result,
-  answer,
   onClose,
 }: {
   theme: AppTheme;
   puzzleNumber: number;
-  puzzle: SkillGuesserPuzzle;
-  result: SkillGuesserResult;
-  /** The value guesses are scored against (skill name in hard mode, else class). */
-  answer: string;
+  puzzle: BgmGuesserPuzzle;
+  result: BgmGuesserResult;
   onClose: () => void;
 }) {
   const styles = toolStyles(theme);
@@ -108,7 +127,8 @@ export default function ResultsDialog({
   // we then reveal the text pre-selected for a manual Ctrl+C.
   const [shareState, setShareState] = useState<"idle" | "copied" | "manual">("idle");
   const manualRef = useRef<HTMLTextAreaElement>(null);
-  const shareText = buildShareText(puzzleNumber, answer, result);
+  const answer = findBgmGuesserAnswer(puzzle.answer);
+  const shareText = buildShareText(puzzleNumber, puzzle.answer, result);
 
   useEffect(() => {
     if (shareState !== "copied") return;
@@ -170,7 +190,7 @@ export default function ResultsDialog({
   return (
     <ModalShell
       theme={theme}
-      ariaLabel="Mapledle results"
+      ariaLabel="BGM Guesser results"
       onClose={onClose}
       style={{ width: "min(420px, calc(100% - 2rem))", padding: "1.5rem" }}
     >
@@ -179,43 +199,26 @@ export default function ResultsDialog({
           {result.won ? "You got it!" : "Out of guesses!"}
         </div>
         <div style={{ fontSize: "0.8rem", fontWeight: 700, color: theme.muted, marginTop: "0.2rem" }}>
-          Mapledle #{puzzleNumber} - {score}
+          BGM Guesser #{puzzleNumber} - {score}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.85rem",
-            margin: "1.1rem 0",
-            padding: "0.85rem 1rem",
-            borderRadius: 12,
-            border: `1px solid ${theme.border}`,
-            background: theme.timerBg,
-            textAlign: "left",
-          }}
-        >
+        <div style={{ ...revealCard, border: `1px solid ${theme.border}`, background: theme.timerBg }}>
           <div style={{ ...revealIconFrame, background: theme.panel, border: `1px solid ${theme.border}` }}>
-            <PuzzleSkillIcon
-              puzzle={puzzle}
-              size={44}
-              alt={puzzle.skillName}
-              style={{ imageRendering: "pixelated" }}
-            />
+            {answer && <MarkIcon id={answer.mark} size={44} style={{ imageRendering: "pixelated" }} />}
           </div>
           <div>
             <div style={{ fontSize: "0.92rem", fontWeight: 800, color: theme.text }}>
-              {puzzle.className}
+              {puzzle.answer}
             </div>
             <div style={{ fontSize: "0.78rem", fontWeight: 600, color: theme.muted }}>
-              {puzzle.skillName}
+              {puzzle.title}
             </div>
           </div>
         </div>
 
         <div style={{ fontSize: "1.3rem", letterSpacing: "0.15em", marginBottom: "1.1rem" }} aria-hidden="true">
           {result.guesses.map((g, i) => (
-            <span key={i}>{g === answer ? "\u{1F7E9}" : "\u{1F7E5}"}</span>
+            <span key={i}>{g === puzzle.answer ? "\u{1F7E9}" : "\u{1F7E5}"}</span>
           ))}
         </div>
 

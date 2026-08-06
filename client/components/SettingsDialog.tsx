@@ -1,8 +1,13 @@
+/*
+  Shared settings dialog for both games. "Wipe Stats" clears only the game it
+  was opened from — the two games keep separate result histories, so wiping
+  BGM Guesser stats shouldn't take Mapledle's with it.
+*/
+
 import { useState, type CSSProperties, type ReactNode } from "react";
-import ModalShell from "../components/ModalShell";
+import ModalShell from "./ModalShell";
 import { systemThemeMode, toolStyles, type AppTheme, type ThemeMode } from "../theme";
 import type { ActivitySettings } from "../settings";
-import { wipeSkillGuesserData } from "./storage";
 
 function SettingRow({
   theme,
@@ -75,14 +80,18 @@ function PillToggle<T extends string>({
 export default function SettingsDialog({
   theme,
   settings,
+  gameTitle,
   onUpdateSettings,
-  onStatsWiped,
+  onWipe,
   onClose,
 }: {
   theme: AppTheme;
   settings: ActivitySettings;
+  /** Named in the wipe copy so it's clear which game's history goes. */
+  gameTitle: string;
   onUpdateSettings: (patch: Partial<ActivitySettings>) => void;
-  onStatsWiped: () => void;
+  /** Clears this game's stored results; the dialog handles the confirm step. */
+  onWipe: () => void;
   onClose: () => void;
 }) {
   const styles = toolStyles(theme);
@@ -90,9 +99,8 @@ export default function SettingsDialog({
   const themeMode: ThemeMode = settings.themeMode ?? systemThemeMode();
 
   function handleWipe() {
-    wipeSkillGuesserData();
+    onWipe();
     setWipeStage("wiped");
-    onStatsWiped();
   }
 
   return (
@@ -129,8 +137,8 @@ export default function SettingsDialog({
           label="Wipe Stats"
           description={
             wipeStage === "confirm"
-              ? "This permanently clears all results, including today's progress. Are you sure?"
-              : "Permanently clear all saved results and stats on this device."
+              ? `This permanently clears all ${gameTitle} results, including today's progress. Are you sure?`
+              : `Permanently clear all saved ${gameTitle} results and stats on this device.`
           }
           control={
             wipeStage === "wiped" ? (

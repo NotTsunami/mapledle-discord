@@ -1,14 +1,19 @@
 /*
-  Wordle-style daily scoreboard card.
+  Wordle-style daily scoreboard cards, one per game.
 
-  When the activity is launched from a channel (entry-point interaction) we
-  post a generated PNG showing everyone in the guild who has finished today's
-  puzzle — avatar, name, and their guess row — plus a "Play" button that
-  re-launches the activity. As more results arrive via POST /api/result, the
-  card is edited in place. When the UTC day rolls over, the finished board is
-  posted again as a new "final results" message; the next day's results then
-  start a fresh card rather than touching the old one (cards are keyed by
-  puzzle number).
+  When a game is launched from a channel (`/skill`, `/bgm`, or that game's card
+  button) we post a generated PNG showing everyone in the guild who has finished
+  that game's puzzle today — avatar, name, and their guess row — plus a Play
+  button that re-launches the activity into the same game. As more results
+  arrive via POST /api/result, the card is edited in place. When the UTC day
+  rolls over, both games' finished boards are posted again as new "final
+  results" messages; the next day's results then start fresh cards rather than
+  touching the old ones (cards are keyed by game + puzzle number).
+
+  The two games are separate cards end to end: separate images, separate
+  messages, separate puzzle numbering (they started on different days) and a
+  different number of guess squares. They reset and finalize together, since
+  both roll over at 00:00 UTC.
 
   Rendering uses @napi-rs/canvas; the guess squares are drawn as rects. Names can
   contain many scripts and emoji, so the container ships font-dejavu (Latin),
@@ -18,6 +23,13 @@
 */
 
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
+import {
+  GAMES,
+  GAME_MODES,
+  currentPuzzleNumber,
+  msUntilNextPuzzle,
+  type GameMode,
+} from "./games.ts";
 import {
   clearScoreboardMessage,
   getDayGuilds,
@@ -30,22 +42,6 @@ import {
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const API_BASE = "https://discord.com/api/v10";
-
-export const LAUNCH_BUTTON_ID = "launch_activity";
-
-/* Mirrors client/skill-guesser/puzzles.ts — puzzle #1 ran on the epoch day. */
-const EPOCH_UTC_MS = Date.UTC(2026, 5, 11);
-const DAY_MS = 86_400_000;
-export const MAX_GUESSES = 5;
-
-export function currentPuzzleNumber(nowMs = Date.now()): number {
-  return Math.max(1, Math.floor((nowMs - EPOCH_UTC_MS) / DAY_MS) + 1);
-}
-
-/** Milliseconds until the next 00:00:00 UTC rollover (mirrors the client). */
-export function msUntilNextPuzzle(nowMs = Date.now()): number {
-  return DAY_MS - ((nowMs - EPOCH_UTC_MS) % DAY_MS);
-}
 
 export function scoreboardEnabled(): boolean {
   return Boolean(BOT_TOKEN);
@@ -167,12 +163,12 @@ function drawHardBadge(ctx: SKRSContext2D, x: number, centerY: number): number {
   return w;
 }
 
-function drawGuessRow(ctx: SKRSContext2D, marks: boolean[], rightX: number, centerY: number): void {
+function drawGuessRow(ctx: SKRSContext2D, marks: boolean[], maxGuesses: number, rightX: number, centerY: number): void {
   const cell = 22;
   const gap = 5;
-  const total = MAX_GUESSES * cell + (MAX_GUESSES - 1) * gap;
+  const total = maxGuesses * cell + (maxGuesses - 1) * gap;
   const startX = rightX - total;
-  for (let i = 0; i < MAX_GUESSES; i++) {
+  for (let i = 0; i < maxGuesses; i++) {
     const x = startX + i * (cell + gap);
     const mark = marks[i];
     if (mark === undefined) {
@@ -193,8 +189,10 @@ export interface PlayerRow extends PlayerResult {
 }
 
 /** Draw one player row inside a column whose left edge is `colX`, width COL_W. */
-function drawRow(ctx: SKRSContext2D, p: PlayerRow, avatar: Image | null, colX: number, y: number): void {
+function drawRow(ctx: SKRSContext2D, mode: GameMode, p: PlayerRow, avatar: Image | null, colX: number, y: number): void {
+  const { maxGuesses, hasHardMode } = GAMES[mode];
   const rightX = colX + COL_W;
+  const hard = hasHardMode && p.hardMode;
 
   ctx.fillStyle = C.rowBg;
   roundRect(ctx, colX, y, COL_W, ROW_H, 10);
@@ -212,23 +210,29 @@ function drawRow(ctx: SKRSContext2D, p: PlayerRow, avatar: Image | null, colX: n
   ctx.font = `bold 15px ${FONT}`;
   // Reserve room for the HARD badge so a long name can't run into it.
   const nameX = colX + 58;
-  const name = truncate(ctx, p.name, p.hardMode ? 230 : 280);
+  const name = truncate(ctx, p.name, hard ? 230 : 280);
   ctx.fillText(name, nameX, y + ROW_H / 2 + 1);
-  if (p.hardMode) {
+  if (hard) {
     drawHardBadge(ctx, nameX + ctx.measureText(name).width + 8, y + ROW_H / 2);
   }
 
-  const score = p.won ? `${p.marks.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
+  const score = p.won ? `${p.marks.length}/${maxGuesses}` : `X/${maxGuesses}`;
   ctx.textAlign = "right";
   ctx.fillStyle = p.won ? C.text : C.muted;
   ctx.font = `bold 14px ${FONT}`;
   ctx.fillText(score, rightX - 12, y + ROW_H / 2 + 1);
 
-  drawGuessRow(ctx, p.marks, rightX - 56, y + ROW_H / 2);
+  drawGuessRow(ctx, p.marks, maxGuesses, rightX - 56, y + ROW_H / 2);
 }
 
 /** Exported for scripts/preview-scoreboard.mjs. */
-export async function renderScoreboard(day: number, players: PlayerRow[], final = false): Promise<Buffer> {
+export async function renderScoreboard(
+  mode: GameMode,
+  day: number,
+  players: PlayerRow[],
+  final = false,
+): Promise<Buffer> {
+  const game = GAMES[mode];
   const sorted = [...players].sort((a, b) => {
     if (a.won !== b.won) return a.won ? -1 : 1;
     if (a.marks.length !== b.marks.length) return a.marks.length - b.marks.length;
@@ -258,13 +262,11 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
   ctx.textAlign = "left";
   ctx.fillStyle = C.accent;
   ctx.font = `bold 26px ${FONT}`;
-  ctx.fillText(`Mapledle #${day}`, PAD, 42);
+  ctx.fillText(`${game.title} #${day}`, PAD, 42);
   ctx.fillStyle = C.muted;
   ctx.font = `13px ${FONT}`;
   ctx.fillText(
-    final
-      ? "Final results — hit Play to take on today's puzzle"
-      : "Today's results — guess which class learns the skill shown",
+    final ? "Final results. Hit Play to take on today's puzzle" : game.subtitle,
     PAD,
     66,
   );
@@ -273,7 +275,7 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
     ctx.fillStyle = C.text;
     ctx.font = `bold 16px ${FONT}`;
     ctx.textAlign = "center";
-    ctx.fillText("No results yet — be the first to solve it!", width / 2, HEADER_H + 26);
+    ctx.fillText("No results yet. Be the first to solve it!", width / 2, HEADER_H + 26);
     return canvas.encode("png");
   }
 
@@ -284,7 +286,7 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
     const rowInCol = i % perCol;
     const colX = PAD + col * (COL_W + COL_GAP);
     const y = HEADER_H + rowInCol * (ROW_H + ROW_GAP);
-    drawRow(ctx, p, avatars[i] ?? null, colX, y);
+    drawRow(ctx, mode, p, avatars[i] ?? null, colX, y);
   });
 
   if (overflow > 0) {
@@ -302,24 +304,31 @@ export async function renderScoreboard(day: number, players: PlayerRow[], final 
 /*  Discord REST                                                       */
 /* ------------------------------------------------------------------ */
 
-function messagePayload(): unknown {
+function messagePayload(mode: GameMode): unknown {
+  const game = GAMES[mode];
   return {
     components: [
       {
         type: 1, // action row
         components: [
-          { type: 2, style: 1, label: "Play Mapledle", custom_id: LAUNCH_BUTTON_ID },
+          { type: 2, style: 1, label: game.buttonLabel, custom_id: game.launchButtonId },
         ],
       },
     ],
-    attachments: [{ id: 0, filename: "scoreboard.png" }],
+    attachments: [{ id: 0, filename: game.filename }],
   };
 }
 
-async function discordRequest(method: string, path: string, payload: unknown, png: Buffer): Promise<Response> {
+async function discordRequest(
+  mode: GameMode,
+  method: string,
+  path: string,
+  payload: unknown,
+  png: Buffer,
+): Promise<Response> {
   const form = new FormData();
   form.append("payload_json", JSON.stringify(payload));
-  form.append("files[0]", new Blob([new Uint8Array(png)], { type: "image/png" }), "scoreboard.png");
+  form.append("files[0]", new Blob([new Uint8Array(png)], { type: "image/png" }), GAMES[mode].filename);
   return fetch(`${API_BASE}${path}`, {
     method,
     headers: { Authorization: `Bot ${BOT_TOKEN}` },
@@ -337,54 +346,69 @@ function withChannelLock(channelId: string, fn: () => Promise<void>): Promise<vo
   return next;
 }
 
-function playerRows(day: number, guildId: string): PlayerRow[] {
-  const entry = getGuildDay(day, guildId);
+function playerRows(mode: GameMode, day: number, guildId: string): PlayerRow[] {
+  const entry = getGuildDay(mode, day, guildId);
   return entry ? Object.entries(entry.players).map(([userId, result]) => ({ userId, ...result })) : [];
 }
 
-/** Post the day's card in a channel, or refresh it if one already exists. */
-export function postOrUpdateScoreboard(day: number, guildId: string, channelId: string): Promise<void> {
+/** Post a game's card for the day in a channel, or refresh it if one exists. */
+export function postOrUpdateScoreboard(
+  mode: GameMode,
+  day: number,
+  guildId: string,
+  channelId: string,
+): Promise<void> {
   if (!BOT_TOKEN) return Promise.resolve();
   return withChannelLock(channelId, async () => {
-    const png = await renderScoreboard(day, playerRows(day, guildId), day < currentPuzzleNumber());
-    const payload = messagePayload();
-    const entry = getGuildDay(day, guildId);
+    const png = await renderScoreboard(
+      mode,
+      day,
+      playerRows(mode, day, guildId),
+      day < currentPuzzleNumber(mode),
+    );
+    const payload = messagePayload(mode);
+    const entry = getGuildDay(mode, day, guildId);
 
     const existing = entry?.messages[channelId];
     if (existing) {
-      const res = await discordRequest("PATCH", `/channels/${channelId}/messages/${existing}`, payload, png);
+      const res = await discordRequest(mode, "PATCH", `/channels/${channelId}/messages/${existing}`, payload, png);
       if (res.ok) return;
       if (res.status !== 404) {
         console.error(`scoreboard edit failed (${res.status}): ${await res.text()}`);
         return;
       }
       // Message was deleted — fall through and post a fresh one.
-      clearScoreboardMessage(day, guildId, channelId);
+      clearScoreboardMessage(mode, day, guildId, channelId);
     }
 
-    const res = await discordRequest("POST", `/channels/${channelId}/messages`, payload, png);
+    const res = await discordRequest(mode, "POST", `/channels/${channelId}/messages`, payload, png);
     if (!res.ok) {
       // Most commonly missing SEND_MESSAGES permission in that channel.
       console.error(`scoreboard post failed (${res.status}): ${await res.text()}`);
       return;
     }
     const message = (await res.json()) as { id: string };
-    setScoreboardMessage(day, guildId, channelId, message.id);
+    setScoreboardMessage(mode, day, guildId, channelId, message.id);
   });
 }
 
 /**
-  Refresh every channel card this guild has for the day (after a new result).
-  `alsoChannelId` — the channel the result came from — gets a fresh post if no
-  card exists for the day there yet (e.g. the player launched from a previous
-  day's card), instead of editing that old post.
+  Refresh every channel card this guild has for that game's day (after a new
+  result). `alsoChannelId` — the channel the result came from — gets a fresh post
+  if no card exists for the day there yet (e.g. the player launched from a
+  previous day's card), instead of editing that old post.
 */
-export async function updateGuildScoreboards(day: number, guildId: string, alsoChannelId?: string): Promise<void> {
-  const entry = getGuildDay(day, guildId);
+export async function updateGuildScoreboards(
+  mode: GameMode,
+  day: number,
+  guildId: string,
+  alsoChannelId?: string,
+): Promise<void> {
+  const entry = getGuildDay(mode, day, guildId);
   const channels = new Set(entry ? Object.keys(entry.messages) : []);
   if (alsoChannelId) channels.add(alsoChannelId);
   for (const channelId of channels) {
-    await postOrUpdateScoreboard(day, guildId, channelId);
+    await postOrUpdateScoreboard(mode, day, guildId, channelId);
   }
 }
 
@@ -393,25 +417,30 @@ export async function updateGuildScoreboards(day: number, guildId: string, alsoC
   finished scoreboard as a NEW message (the play button now launches the next
   puzzle). The new message replaces the old one in the store, so any straggler
   results that arrive in the rollover grace window edit the final post.
+
+  Both games roll over at the same instant, so both are finalized in the same
+  pass — a channel that plays both gets both final cards together.
 */
 export async function postFinalScoreboards(): Promise<void> {
   if (!BOT_TOKEN) return;
-  const endedDay = currentPuzzleNumber() - 1;
-  if (endedDay < 1 || getFinalizedDay() >= endedDay) return;
-  setFinalizedDay(endedDay);
+  for (const mode of GAME_MODES) {
+    const endedDay = currentPuzzleNumber(mode) - 1;
+    if (endedDay < 1 || getFinalizedDay(mode) >= endedDay) continue;
+    setFinalizedDay(mode, endedDay);
 
-  for (const [guildId, entry] of Object.entries(getDayGuilds(endedDay))) {
-    for (const channelId of Object.keys(entry.messages)) {
-      await withChannelLock(channelId, async () => {
-        const png = await renderScoreboard(endedDay, playerRows(endedDay, guildId), true);
-        const res = await discordRequest("POST", `/channels/${channelId}/messages`, messagePayload(), png);
-        if (!res.ok) {
-          console.error(`final scoreboard post failed (${res.status}): ${await res.text()}`);
-          return;
-        }
-        const message = (await res.json()) as { id: string };
-        setScoreboardMessage(endedDay, guildId, channelId, message.id);
-      });
+    for (const [guildId, entry] of Object.entries(getDayGuilds(mode, endedDay))) {
+      for (const channelId of Object.keys(entry.messages)) {
+        await withChannelLock(channelId, async () => {
+          const png = await renderScoreboard(mode, endedDay, playerRows(mode, endedDay, guildId), true);
+          const res = await discordRequest(mode, "POST", `/channels/${channelId}/messages`, messagePayload(mode), png);
+          if (!res.ok) {
+            console.error(`final scoreboard post failed (${res.status}): ${await res.text()}`);
+            return;
+          }
+          const message = (await res.json()) as { id: string };
+          setScoreboardMessage(mode, endedDay, guildId, channelId, message.id);
+        });
+      }
     }
   }
 }

@@ -11,7 +11,7 @@ Discord client ──iframe──▶ <app id>.discordsays.com (Discord activity 
        └──────▶ Cloudflare edge ──tunnel──▶ cloudflared ──http──▶ activity (:3000)
                 (your domain)                (container)           client bundle + /api/token
        /.proxy/haku
-       └──────▶ your icon host ──▶ skill icon images (see §6)
+       └──────▶ your media host ──▶ skill icons, area marks, BGM tracks (see §6)
 ```
 
 - The activity container is **never** published to the LAN or the internet —
@@ -31,8 +31,8 @@ Discord client ──iframe──▶ <app id>.discordsays.com (Discord activity 
   Cloudflare) — or any other way to serve the container over HTTPS.
 - A Discord account with access to the
   [Developer Portal](https://discord.com/developers/applications).
-- A host serving the skill icon images (see §6 — set this up first if you
-  don't have one).
+- A host serving the game media — skill icons, area marks and BGM tracks (see
+  §6 — set this up first if you don't have one).
 
 ---
 
@@ -54,12 +54,12 @@ Discord client ──iframe──▶ <app id>.discordsays.com (Discord activity 
 4. **Activities → URL Mappings** — this is how Discord's proxy reaches your
    servers (targets are bare domains, no scheme):
 
-   | Prefix  | Target                 | Purpose                                     |
-   |---------|------------------------|---------------------------------------------|
-   | `/`     | `mapledle.example.com` | The activity itself (client + `/api/token`) |
-   | `/haku` | your icon host         | Skill icon images (§6)                      |
+   | Prefix  | Target                 | Purpose                                        |
+   |---------|------------------------|------------------------------------------------|
+   | `/`     | `mapledle.example.com` | The activity itself (client + `/api/token`)    |
+   | `/haku` | your media host        | Skill icons, area marks, BGM tracks (§6)       |
 
-   Inside the iframe the client fetches icons from `/.proxy/haku/...`;
+   Inside the iframe the client fetches all of those from `/.proxy/haku/...`;
    Discord's proxy forwards that to the mapped host. (The `/haku` prefix name
    is hardcoded in `client/resource.ts` — rename it in both places if you
    prefer something else.)
@@ -117,7 +117,7 @@ Set in `.env`:
 VITE_DISCORD_CLIENT_ID=<Client ID from §2.2>
 DISCORD_CLIENT_SECRET=<Client Secret from §2.2>
 TUNNEL_TOKEN=<token from §4.3>
-VITE_RESOURCE_BASE=<icon host base URL from §6, e.g. https://icons.example.com>
+VITE_RESOURCE_BASE=<media host base URL from §6, e.g. https://haku.example.com>
 ```
 
 Build and launch:
@@ -134,7 +134,7 @@ The client ID and `VITE_RESOURCE_BASE` are baked into the client bundle at
 
 ---
 
-## 5b. Scoreboard launch card (optional)
+## 5b. Scoreboard launch cards (optional)
 
 By default Discord posts its stock "started a game / Join" card when the
 activity launches. With this set up, the app instead posts a generated
@@ -142,8 +142,19 @@ Wordle-style scoreboard image (today's finishers in that server + a **Play**
 button) and edits it as more results come in. At the UTC day rollover the
 finished board is re-posted as a new "final results" message, and the first
 result for the next puzzle starts a fresh card instead of touching the old
-one. A `/start` slash command (registered in step 2) launches the activity
-the same way as the Entry Point command.
+one.
+
+**Each game gets its own card.** Mapledle and the BGM Guesser have separate
+images, separate messages and separate puzzle numbering (they launched on
+different days), and their Play buttons re-launch into their own game. Both
+roll over at 00:00 UTC, so a channel that plays both gets both final cards in
+the same pass. The `/skill` and `/bgm` slash commands (registered in step 2)
+launch the activity straight into that game and drop its card in the channel.
+
+Step 2 also registers `/help`, which replies (only to whoever ran it) with an
+explainer covering both games, the daily rollover and the scoreboard cards.
+Step 5 wires up the same message being posted automatically when the app is
+added to a server.
 
 1. Add to `.env` on the host:
 
@@ -155,9 +166,11 @@ the same way as the Entry Point command.
    then `docker compose up -d` (recreate; a plain `restart` does not re-read
    `.env`). The boot log warns if either is missing.
 
-2. Switch the Entry Point command to `APP_HANDLER` and register the `/start`
-   slash command (one-time, from any machine with the repo and a `.env`
-   containing `DISCORD_BOT_TOKEN`):
+2. Switch the Entry Point command to `APP_HANDLER` and register the `/skill`,
+   `/bgm` and `/help` slash commands (one-time, from any machine with the repo
+   and a `.env` containing `DISCORD_BOT_TOKEN`). The script is idempotent and
+   also removes the older single `/start` command that `/skill` and `/bgm`
+   replace:
 
    ```bash
    npm run configure-entry-point
@@ -173,43 +186,75 @@ the same way as the Entry Point command.
    launch channel. If launching logs `scoreboard post failed (403)`, invite
    it: `https://discord.com/oauth2/authorize?client_id=<client id>&scope=bot`.
 
+5. **Introduce the app on install** (optional). Developer Portal →
+   **Webhooks** → **Event Webhooks URL**:
+   `https://mapledle.example.com/webhook-events`, then enable the endpoint and
+   subscribe to the **Application Authorized** event. With this on, the app
+   posts the `/help` explainer (plus both Play buttons) the moment someone adds
+   it to a server.
+
+   - This is a **separate** setting from the Interactions Endpoint URL in
+     step 3, on its own portal page. Both are Ed25519-verified with the same
+     public key, but they PING differently, so they need the two distinct
+     routes. Setting one does not set the other.
+   - An interactions-only app has no gateway connection and therefore never
+     sees `GUILD_CREATE`; this webhook is the only way it hears about installs.
+   - It picks a channel to greet in by trying the server's **system channel**
+     first, then the earliest text channels, giving up after five refusals.
+     Nothing is posted if the bot can't speak anywhere (logged as
+     `welcome: no channel in guild … accepted the message`), and nothing is
+     posted for user-account installs, which have no server.
+   - Requires the `bot` scope from step 4. Adding the app without it authorizes
+     the activity but leaves nothing that can post.
+
 Scoreboard data (results + posted message ids) persists in the
 `activity-data` volume; days older than yesterday are pruned automatically.
-Preview the card layout locally with `node scripts/preview-scoreboard.mjs`.
+Preview both games' card layouts locally with
+`node scripts/preview-scoreboard.mjs`.
+
+> **Upgrading from the single-game build:** the store file gained a per-game
+> dimension, so an older `scoreboards.json` is discarded on first boot. It only
+> ever holds today and yesterday, so the cost is one duplicate card in each
+> channel that already had one.
 
 ---
 
-## 6. Skill icon host
+## 6. Media host
 
-The client doesn't bundle the skill icon images — it loads them from a host
-you provide. `client/resource.ts` builds URLs as:
+The client doesn't bundle any game media — it loads it from a host you
+provide. `client/resource.ts` builds three URL shapes:
 
 ```
-{base}/api/img/{type}/{id}/icon.png
+{base}/api/img/{type}/{id}/icon.png     skill icons ({type} = skill | erda-skill | hexa-skill)
+{base}/api/img/ui/mark/{id}/icon.png    world-map area marks (BGM Guesser answers)
+{base}/api/bgm/{group}/{track}/track.mp3   BGM Guesser audio
 ```
 
-where `{type}` is `skill`, `erda-skill`, or `hexa-skill` and `{id}` is the
-skill id from `client/skill-guesser/puzzle-data.generated.ts`. Outside Discord
-the base is `VITE_RESOURCE_BASE`; inside Discord it's always the `/haku` URL
+The ids come from each game's `puzzle-data.generated.ts`. Outside Discord the
+base is `VITE_RESOURCE_BASE`; inside Discord it's always the `/haku` URL
 mapping (§2.4), which must point at the same host. Two options:
 
-### Option A — host your own icon CDN
+### Option A — host your own media CDN
 
-Serve the icons as static files under the path layout above from any static
-host (Cloudflare Pages/R2, S3 + CloudFront, nginx, a small container behind
-its own tunnel — anything). Extract the icons from the game data with the
-usual community tooling, or export them from an existing source such as
+Serve the files as statics under the path layout above from any static host
+(Cloudflare Pages/R2, S3 + CloudFront, nginx, a small container behind its own
+tunnel — anything). Extract the icons and BGM from the game data with the usual
+community tooling, or export the icons from an existing source such as
 maplestory.io.
 
 Requirements:
 
 - **CORS** — respond with `Access-Control-Allow-Origin` for your activity
-  origin (`https://mapledle.example.com`), since direct visits load icons
+  origin (`https://mapledle.example.com`), since direct visits load media
   cross-origin.
+- **Range requests** — the BGM tracks are streamed by an `<audio>` element, so
+  the host must answer `Range` with `206 Partial Content`. Most static hosts do
+  this out of the box.
 - **Hotlink protection** — if your host/WAF restricts referers, allow your
   activity domain **and** `discordsays.com` (requests inside Discord carry the
   proxy's referer).
-- Put a CDN/edge cache in front if you can; the images are tiny and immutable.
+- Put a CDN/edge cache in front if you can; the assets are immutable (the icons
+  are tiny, the tracks are a few hundred KB each).
 
 ### Option B — use a public API (maplestory.io)
 
@@ -225,6 +270,11 @@ needed, and map all three resource types onto the API's routes). Then set the
 `/haku` URL mapping target to `maplestory.io`. Keep in mind it's a free
 community service — availability and rate limits aren't guaranteed, so prefer
 Option A for anything with real traffic.
+
+**This option covers skill icons only.** It serves no `ui/mark` icons and no
+BGM, so the BGM Guesser's player stays stuck on "This track could not be
+loaded" and its answer picker renders without mark icons. Point `/haku` at a
+host that serves all three shapes if you want both games.
 
 ---
 
@@ -242,15 +292,22 @@ curl -s -o /dev/null -w "%{http_code}\n" https://mapledle.example.com/   # -> 20
 # Origin IP hidden
 dig +short mapledle.example.com   # -> Cloudflare anycast IPs, NOT your origin IP
 
-# CORS on the icon host for the activity origin
+# CORS on the media host for the activity origin
 curl -sI -H "Origin: https://mapledle.example.com" \
-  https://<icon host>/api/img/skill/0001227/icon.png | grep -i access-control-allow-origin
+  https://<media host>/api/img/skill/0001227/icon.png | grep -i access-control-allow-origin
 # -> access-control-allow-origin: https://mapledle.example.com
+
+# BGM streaming (range requests)
+curl -sI -H "Range: bytes=0-1023" \
+  https://<media host>/api/bgm/Bgm01/CavaBien/track.mp3 | head -3
+# -> HTTP/2 206 ... content-type: audio/mpeg
 ```
 
-In Discord (a server where the app is installed): open a voice channel or the
-App Launcher → find the app → **Launch**. The game should load, show
-"Playing as *your name*", and render the daily skill icon.
+In Discord (a server where the app is installed): run `/skill` and `/bgm`, or
+open a voice channel or the App Launcher → find the app → **Launch**. The game
+should load, show "Playing as *your name*", and render the daily skill icon
+(Mapledle) or play the daily track (BGM Guesser). Each command should also drop
+that game's scoreboard card in the channel.
 
 Visiting your domain directly in a browser also works — the game just runs
 without the Discord handshake.
@@ -299,7 +356,7 @@ npm run dev                 # Vite on :5173 (proxies /api -> :3000)
   ```
 
   Copy the printed `https://<random>.trycloudflare.com` host into the dev
-  app's `/` URL mapping (plus the same `/haku` → icon host mapping), then
+  app's `/` URL mapping (plus the same `/haku` → media host mapping), then
   launch the activity in Discord. The quick-tunnel hostname changes on every
   run, so expect to re-paste it.
 
@@ -314,11 +371,18 @@ npm run dev                 # Vite on :5173 (proxies /api -> :3000)
 | `cloudflared` logs `no ingress rules` | Public hostname not configured on the tunnel (§4.4). |
 | Stuck on "Connecting to Discord…" | Token exchange failing — check `docker compose logs activity` for `Token exchange failed`; usually a wrong `DISCORD_CLIENT_SECRET` or missing OAuth2 redirect (§2.2). |
 | `authorize()` rejects / consent popup errors | No redirect URI registered on the OAuth2 tab (§2.2), or client ID mismatch between bundle and app (rebuild after changing it). |
-| Skill icons broken **inside** Discord only | `/haku` URL mapping missing (§2.4) — direct requests to external hosts are CSP-blocked in the iframe. |
-| Skill icons broken everywhere | Icon host down, wrong `VITE_RESOURCE_BASE` (rebuild after changing it), or hotlink/CORS rules blocking the activity domain / `discordsays.com` referers (§6). |
-| Icons 404 through `/.proxy/haku` but fine on the icon host | URL mapping target has a scheme or path — it must be the bare domain. |
+| Skill icons or area marks broken **inside** Discord only | `/haku` URL mapping missing (§2.4) — direct requests to external hosts are CSP-blocked in the iframe. |
+| Skill icons or area marks broken everywhere | Media host down, wrong `VITE_RESOURCE_BASE` (rebuild after changing it), or hotlink/CORS rules blocking the activity domain / `discordsays.com` referers (§6). |
+| Media 404s through `/.proxy/haku` but fine on the media host | URL mapping target has a scheme or path — it must be the bare domain. |
+| BGM player stuck on "This track could not be loaded" | Media host doesn't serve `/api/bgm/{group}/{track}/track.mp3` (Option B doesn't — §6), or it doesn't answer `Range` requests. |
 | Discord-side `blocked:csp` console errors | Some resource is fetched from an external host without a URL mapping; route it through a `/.proxy/<prefix>` mapping. |
-| Wrong/different puzzle vs the website | `puzzles.ts` epoch/key or `puzzle-data.generated.ts` drifted from the website — re-sync (README) and redeploy. |
-| No scoreboard card on launch, nothing in logs | Interaction never reached the server: Interactions Endpoint URL not set (§5b.3), Entry Point command still `DISCORD_LAUNCH_ACTIVITY` (§5b.2), or a stale client (Ctrl+R). A working launch logs `entry-point launch: …`. |
+| Wrong/different puzzle vs the website | That game's `puzzles.ts` epoch/key or `puzzle-data.generated.ts` drifted from the website — re-sync (README) and redeploy. |
+| Card is numbered differently from the game inside the activity | `server/games.ts` epoch drifted from `client/<game>/puzzles.ts`; they must match (README). |
+| `/skill`, `/bgm` or `/help` not offered in Discord | Commands not registered (§5b.2) or a stale client (Ctrl+R). |
+| No message when the app is added to a server | Event Webhooks URL not set or Application Authorized not subscribed (§5b.5), app added without the `bot` scope, or the bot can't send in any channel — check the logs for `welcome:`. |
+| Portal rejects the Event Webhooks URL | Old server still deployed (no `/webhook-events` route) or `DISCORD_PUBLIC_KEY` missing/wrong. The save-time PING must get a bare `204`. |
+| `/bgm` opens Mapledle (or vice versa) | The pending-mode note is missed when the client can't authenticate — check the logs for `Token exchange failed`. Use the header's Skill/BGM switcher meanwhile. |
+| No scoreboard card on launch, nothing in logs | Interaction never reached the server: Interactions Endpoint URL not set (§5b.3), Entry Point command still `DISCORD_LAUNCH_ACTIVITY` (§5b.2), or a stale client (Ctrl+R). |
 | `scoreboard post failed (403)` in logs | Bot not in the server or no Send Messages in that channel (§5b.4). |
+| Duplicate cards right after upgrading to the two-game build | Expected once: the store file's format changed and the old message ids were dropped (§5b). |
 | Portal rejects the Interactions Endpoint URL | Old server still deployed (no `/interactions` route) or `DISCORD_PUBLIC_KEY` missing/wrong in `.env` — the save-time PING must return signed PONG. |

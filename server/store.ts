@@ -1,12 +1,16 @@
 /*
   JSON-file store for the daily per-guild scoreboards behind the custom launch
-  card. Persisted to DATA_DIR (a docker volume in production) so a container
+  cards. Persisted to DATA_DIR (a docker volume in production) so a container
   restart doesn't lose the day's results. Single process, low write volume —
   synchronous atomic writes (tmp + rename) are plenty.
+
+  Each game keeps its own tree: the two run on different epochs, so "day 42"
+  means a different date in each, and their cards are separate messages.
 */
 
 import fs from "node:fs";
 import path from "node:path";
+import { GAME_MODES, type GameMode } from "./games.ts";
 
 export interface PlayerResult {
   /** Display name at the time they finished. */
@@ -14,7 +18,7 @@ export interface PlayerResult {
   /** Avatar hash, or null for the default avatar. */
   avatar: string | null;
   won: boolean;
-  /** Solved against the skill name (hard) rather than the class name. */
+  /** Mapledle only: solved against the skill name (hard) rather than the class. */
   hardMode: boolean;
   /** Per-guess hit/miss, in order. */
   marks: boolean[];
@@ -28,23 +32,37 @@ export interface GuildDay {
   messages: Record<string, string>;
 }
 
+/** puzzleNumber -> guildId -> results, for one game. */
+type ModeDays = Record<string, Record<string, GuildDay>>;
+
 interface StoreShape {
-  version: 1;
-  /** puzzleNumber -> guildId -> results. */
-  days: Record<string, Record<string, GuildDay>>;
-  /** Last day whose end-of-day final scoreboards have been posted. */
-  finalizedDay?: number;
+  version: 2;
+  games: Record<GameMode, ModeDays>;
+  /** Last day whose end-of-day final scoreboards have been posted, per game. */
+  finalizedDay: Partial<Record<GameMode, number>>;
 }
 
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
 const FILE = path.join(DATA_DIR, "scoreboards.json");
 
-let store: StoreShape = { version: 1, days: {} };
+function emptyStore(): StoreShape {
+  return { version: 2, games: { skill: {}, bgm: {} }, finalizedDay: {} };
+}
 
+let store: StoreShape = emptyStore();
+
+/*
+  A version-1 file (single game, no `games` key) is discarded rather than
+  migrated: it only ever holds today and yesterday, so the cost is one duplicate
+  card in each channel that already had one when the new build rolled out.
+*/
 export function loadStore(): void {
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, "utf8")) as StoreShape;
-    if (parsed?.version === 1 && parsed.days) store = parsed;
+    if (parsed?.version === 2 && parsed.games) {
+      store = { ...emptyStore(), ...parsed };
+      for (const mode of GAME_MODES) store.games[mode] ??= {};
+    }
   } catch {
     /* first run or unreadable — start empty */
   }
@@ -58,56 +76,69 @@ function save(): void {
 }
 
 /* Keep yesterday around for UTC-rollover stragglers; drop anything older. */
-function prune(currentDay: number): void {
-  for (const key of Object.keys(store.days)) {
-    if (Number(key) < currentDay - 1) delete store.days[key];
+function prune(mode: GameMode, currentDay: number): void {
+  const days = store.games[mode];
+  for (const key of Object.keys(days)) {
+    if (Number(key) < currentDay - 1) delete days[key];
   }
 }
 
-export function getGuildDay(day: number, guildId: string): GuildDay | null {
-  return store.days[String(day)]?.[guildId] ?? null;
+export function getGuildDay(mode: GameMode, day: number, guildId: string): GuildDay | null {
+  return store.games[mode][String(day)]?.[guildId] ?? null;
 }
 
 /** Every guild with results or cards for the day: guildId -> entry. */
-export function getDayGuilds(day: number): Record<string, GuildDay> {
-  return store.days[String(day)] ?? {};
+export function getDayGuilds(mode: GameMode, day: number): Record<string, GuildDay> {
+  return store.games[mode][String(day)] ?? {};
 }
 
-export function getFinalizedDay(): number {
-  return store.finalizedDay ?? 0;
+export function getFinalizedDay(mode: GameMode): number {
+  return store.finalizedDay[mode] ?? 0;
 }
 
-export function setFinalizedDay(day: number): void {
-  store.finalizedDay = day;
+export function setFinalizedDay(mode: GameMode, day: number): void {
+  store.finalizedDay[mode] = day;
   save();
 }
 
-function ensureGuildDay(day: number, guildId: string): GuildDay {
-  const days = (store.days[String(day)] ??= {});
+function ensureGuildDay(mode: GameMode, day: number, guildId: string): GuildDay {
+  const days = (store.games[mode][String(day)] ??= {});
   return (days[guildId] ??= { players: {}, messages: {} });
 }
 
 export function recordResult(
+  mode: GameMode,
   day: number,
   guildId: string,
   userId: string,
   result: PlayerResult,
   currentDay: number,
 ): void {
-  const entry = ensureGuildDay(day, guildId);
+  const entry = ensureGuildDay(mode, day, guildId);
   // First finish wins; a re-report (e.g. after wiping stats) doesn't overwrite.
   entry.players[userId] ??= result;
-  prune(currentDay);
+  prune(mode, currentDay);
   save();
 }
 
-export function setScoreboardMessage(day: number, guildId: string, channelId: string, messageId: string): void {
-  ensureGuildDay(day, guildId).messages[channelId] = messageId;
+export function setScoreboardMessage(
+  mode: GameMode,
+  day: number,
+  guildId: string,
+  channelId: string,
+  messageId: string,
+): void {
+  ensureGuildDay(mode, day, guildId).messages[channelId] = messageId;
   save();
 }
 
-export function clearScoreboardMessage(day: number, guildId: string, channelId: string): void {
-  const entry = getGuildDay(day, guildId);
+export function clearScoreboardMessage(
+  mode: GameMode,
+  day: number,
+  guildId: string,
+  channelId: string,
+): void {
+  const entry = getGuildDay(mode, day, guildId);
   if (!entry) return;
   delete entry.messages[channelId];
   save();
