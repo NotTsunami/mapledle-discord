@@ -4,31 +4,24 @@
   ../games-store.ts).
 */
 
-import {
-  computeStats,
-  readResult,
-  wipeResults,
-  writeResult,
-  type GameResult,
-  type GameStats,
-} from "../games-store";
+import { computeGuessStats, type GuessResult, type GuessStats } from "../dailyGame";
+import { readResult, readResults, wipeResults, writeResult } from "../games-store";
 import { MAX_GUESSES } from "./puzzles";
 
-export type BgmGuesserResult = GameResult;
-export type BgmGuesserStats = GameStats;
+const SECTION = "bgmGuesser";
 
-export function readBgmGuesserResult(puzzleNumber: number): BgmGuesserResult | null {
-  return readResult("bgmGuesser", puzzleNumber);
+export function readBgmGuesserResult(puzzleNumber: number): GuessResult | null {
+  return readResult(SECTION, puzzleNumber);
 }
 
-export function writeBgmGuesserResult(puzzleNumber: number, result: BgmGuesserResult): void {
-  writeResult("bgmGuesser", puzzleNumber, result);
+export function writeBgmGuesserResult(puzzleNumber: number, result: GuessResult): void {
+  writeResult(SECTION, puzzleNumber, result);
 }
 
 export function wipeBgmGuesserData(): void {
-  wipeResults("bgmGuesser");
+  wipeResults(SECTION);
 }
 
-export function computeBgmGuesserStats(): BgmGuesserStats {
-  return computeStats("bgmGuesser", MAX_GUESSES);
+export function computeBgmGuesserStats(): GuessStats {
+  return computeGuessStats(Object.values(readResults(SECTION)), MAX_GUESSES);
 }

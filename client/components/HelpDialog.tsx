@@ -1,7 +1,13 @@
-import ModalShell from "../components/ModalShell";
+/*
+  "How to play" dialog shared by both games. The game supplies its rules as
+  children (one block per paragraph); the MapleDoro blurb, external links and
+  close button are the same for both.
+*/
+
+import type { ReactNode } from "react";
+import ModalShell from "./ModalShell";
 import { openExternal } from "../discord";
 import { toolStyles, type AppTheme } from "../theme";
-import { MAX_GUESSES } from "./puzzles";
 
 const MAIN_LINK = { label: "mapledoro.com", url: "https://www.mapledoro.com" };
 
@@ -10,7 +16,18 @@ const LEGAL_LINKS = [
   { label: "Privacy Policy", url: "https://www.mapledoro.com/privacy" },
 ];
 
-export default function HelpDialog({ theme, onClose }: { theme: AppTheme; onClose: () => void }) {
+export default function HelpDialog({
+  theme,
+  gameName,
+  onClose,
+  children,
+}: {
+  theme: AppTheme;
+  /** Named in the MapleDoro blurb. */
+  gameName: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
   const styles = toolStyles(theme);
 
   return (
@@ -24,19 +41,12 @@ export default function HelpDialog({ theme, onClose }: { theme: AppTheme; onClos
         How to Play
       </div>
 
-      <div style={{ fontSize: "0.82rem", fontWeight: 600, color: theme.text, lineHeight: 1.55 }}>
-        Guess which MapleStory class learns the daily skill in {MAX_GUESSES} tries. Wrong guesses
-        unlock hints: the class&apos;s main stat after 2 misses, its secondary stat after 3, and its
-        weapon after 4. A new puzzle arrives every day at 00:00 UTC.
-      </div>
-
-      <div style={{ fontSize: "0.82rem", fontWeight: 600, color: theme.text, lineHeight: 1.55, marginTop: "0.7rem" }}>
-        Switch to <strong>Hard</strong> in the header to name the skill itself instead of the class.
-        Pick your difficulty before your first guess: it locks in for the day once you start.
+      <div style={{ display: "grid", gap: "0.7rem", fontSize: "0.82rem", fontWeight: 600, color: theme.text, lineHeight: 1.55 }}>
+        {children}
       </div>
 
       <div style={{ fontSize: "0.78rem", fontWeight: 600, color: theme.muted, lineHeight: 1.5, margin: "0.8rem 0 1rem" }}>
-        Mapledle is part of MapleDoro, a free MapleStory community toolkit. Play this puzzle
+        {gameName} is part of MapleDoro, a free MapleStory community toolkit. Play this puzzle
         and find more tools on the web at mapledoro.com. Not affiliated with Nexon.
       </div>
 

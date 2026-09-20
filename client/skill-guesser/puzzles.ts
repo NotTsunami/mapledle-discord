@@ -6,6 +6,7 @@
   at 00:00:00 UTC; puzzle #1 ran on SKILL_GUESSER_EPOCH day.
 */
 
+import { makePuzzleClock } from "../dailyGame";
 import { SKILL_GUESSER_PUZZLE_DATA } from "./puzzle-data.generated";
 
 export type PuzzleResource = "skill" | "hexa-skill" | "erda-skill";
@@ -19,9 +20,8 @@ export interface SkillGuesserPuzzle {
 
 export const MAX_GUESSES = 5;
 
-// UTC day of puzzle #1.
-const EPOCH_UTC_MS = Date.UTC(2026, 5, 11);
-const DAY_MS = 86_400_000;
+/** Puzzle numbering and rollover; the argument is the UTC day of puzzle #1. */
+export const PUZZLE_CLOCK = makePuzzleClock(Date.UTC(2026, 5, 11));
 const XOR_KEY = "mapledoro-skill-guesser";
 
 // Payload resourceType codes, matching the generator script.
@@ -44,10 +44,6 @@ function decodePuzzles(): SkillGuesserPuzzle[] {
   return cache;
 }
 
-export function currentPuzzleNumber(nowMs = Date.now()): number {
-  return Math.max(1, Math.floor((nowMs - EPOCH_UTC_MS) / DAY_MS) + 1);
-}
-
 export function getPuzzle(puzzleNumber: number): SkillGuesserPuzzle {
   const puzzles = decodePuzzles();
   return puzzles[(puzzleNumber - 1) % puzzles.length];
@@ -66,9 +62,4 @@ export function allSkillNames(): string[] {
     );
   }
   return skillNameCache;
-}
-
-/** Milliseconds until the next 00:00:00 UTC rollover. */
-export function msUntilNextPuzzle(nowMs = Date.now()): number {
-  return DAY_MS - ((nowMs - EPOCH_UTC_MS) % DAY_MS);
 }

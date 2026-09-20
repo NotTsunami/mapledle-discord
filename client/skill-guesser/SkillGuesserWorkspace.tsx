@@ -1,245 +1,58 @@
 /*
-  Port of mapledoro's SkillGuesserWorkspace for the Discord Activity.
-  Differences from the web version: no next/link back-navigation, no SSR mount
-  gate, an optional "Playing as" line for the authenticated Discord user,
-  settings/help dialogs, a header difficulty toggle (hard mode asks for the
-  skill name instead of the class), the game switcher, and Wordle-style rich
-  presence updates.
+  Port of mapledoro's SkillGuesserWorkspace for the Discord Activity. The
+  shared chrome (header, dialogs, rollover, guess picker, results) lives in
+  ../DailyGameWorkspace and friends; this file keeps only what is Mapledle's:
+  the icon prompt, the hint cards, and hard mode.
+
+  Hard mode deliberately differs from the website. There, Hard unlocks after
+  Normal is finished and each day has a result per mode. Here it is a header
+  toggle picked before the first guess (hard mode asks for the skill name
+  instead of the class), locked for the rest of the day once the player has
+  guessed, and each puzzle has a single result.
 */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ActionButton } from "../components/ActionButton";
-import { HeaderIconButton, SegmentedToggle } from "../components/HeaderControls";
-import SettingsDialog from "../components/SettingsDialog";
-import { reportGameResult, updateGameActivity } from "../discord";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { SegmentedToggle } from "../components/HeaderControls";
+import { EMPTY_RESULT, applyGuess } from "../dailyGame";
+import DailyGameWorkspace, { useGamePresence } from "../DailyGameWorkspace";
+import { reportGameResult } from "../discord";
 import { GAME_META, type GameMode } from "../games";
+import { GuessControls } from "../GuessControls";
+import ResultsDialog from "../ResultsDialog";
 import type { ActivitySettings } from "../settings";
+import { GuessSlots } from "../shared-ui";
 import { toolStyles, type AppTheme } from "../theme";
 import { SKILL_GUESSER_CLASSES, findSkillGuesserClass } from "./classes";
 import {
   MAX_GUESSES,
+  PUZZLE_CLOCK,
   allSkillNames,
-  currentPuzzleNumber,
   getPuzzle,
-  msUntilNextPuzzle,
   type SkillGuesserPuzzle,
 } from "./puzzles";
-import HelpDialog from "./HelpDialog";
 import PuzzleSkillIcon from "./PuzzleSkillIcon";
-import ResultsDialog from "./ResultsDialog";
 import {
+  computeSkillGuesserStats,
   readSkillGuesserResult,
   wipeSkillGuesserData,
   writeSkillGuesserResult,
-  type SkillGuesserResult,
 } from "./storage";
 
-const HIT_GREEN = "#2d8a2d";
-const MISS_RED = "#c44040";
+const BASE_PATH = "/games/skill-guesser";
+
+const iconFrame: CSSProperties = {
+  width: 84,
+  height: 84,
+  borderRadius: 14,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  overflow: "hidden",
+};
 
 /* ------------------------------------------------------------------ */
-/*  Guess picker (searchable combobox over the answer pool)            */
+/*  Hints                                                              */
 /* ------------------------------------------------------------------ */
-
-function GuessPicker({
-  theme,
-  options,
-  search,
-  guessed,
-  placeholder,
-  ariaLabel,
-  emptyLabel,
-  onSearchChange,
-  onStage,
-  onSubmit,
-}: {
-  theme: AppTheme;
-  options: string[];
-  search: string;
-  guessed: Set<string>;
-  placeholder: string;
-  ariaLabel: string;
-  emptyLabel: string;
-  onSearchChange: (v: string) => void;
-  onStage: (name: string) => void;
-  onSubmit: (name: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((name) => name.toLowerCase().includes(q));
-  }, [search, options]);
-
-  function pick(name: string) {
-    onStage(name);
-    setOpen(false);
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      setOpen(false);
-      return;
-    }
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    const exact = filtered.find((name) => name.toLowerCase() === search.trim().toLowerCase());
-    if (exact && !guessed.has(exact)) {
-      setOpen(false);
-      onSubmit(exact);
-      return;
-    }
-    const first = filtered.find((name) => !guessed.has(name));
-    if (first) pick(first);
-  }
-
-  const menuStyle: CSSProperties = {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
-    maxHeight: 240,
-    overflowY: "auto",
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    zIndex: 10,
-    marginTop: 4,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-  };
-
-  return (
-    <div ref={ref} style={{ position: "relative", flex: 1, minWidth: 220 }}>
-      <input
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls="sg-guess-listbox"
-        aria-label={ariaLabel}
-        value={search}
-        placeholder={placeholder}
-        className="tool-input"
-        onChange={(e) => {
-          onSearchChange(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={handleKeyDown}
-        style={{ ...toolStyles(theme).inputStyle, width: "100%", height: 40, boxSizing: "border-box" }}
-      />
-      {open && (
-        <div id="sg-guess-listbox" role="listbox" style={menuStyle}>
-          {filtered.length === 0 && (
-            <div style={{ padding: 12, fontSize: "0.8rem", color: theme.muted, textAlign: "center" }}>
-              {emptyLabel}
-            </div>
-          )}
-          {filtered.map((name) => {
-            const used = guessed.has(name);
-            return (
-              <button
-                key={name}
-                type="button"
-                role="option"
-                aria-selected={search === name}
-                className="sg-option"
-                disabled={used}
-                onClick={() => pick(name)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  background: "none",
-                  border: "none",
-                  padding: "7px 12px",
-                  font: "inherit",
-                  textAlign: "left",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                  color: used ? theme.muted : theme.text,
-                  textDecoration: used ? "line-through" : "none",
-                  cursor: used ? "not-allowed" : "pointer",
-                }}
-              >
-                {name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Guess slots + hints                                                */
-/* ------------------------------------------------------------------ */
-
-function GuessSlots({
-  theme,
-  guesses,
-  answer,
-}: {
-  theme: AppTheme;
-  guesses: string[];
-  answer: string;
-}) {
-  return (
-    <div style={{ display: "grid", gap: "0.35rem" }}>
-      {Array.from({ length: MAX_GUESSES }, (_, i) => {
-        const guess = guesses[i];
-        const correct = guess === answer;
-        const filled: CSSProperties = guess
-          ? {
-              border: `1px solid ${correct ? HIT_GREEN : MISS_RED}`,
-              background: theme.panel,
-              color: theme.text,
-            }
-          : {
-              border: `1px dashed ${theme.border}`,
-              background: theme.timerBg,
-              color: theme.muted,
-            };
-        return (
-          <div
-            key={i}
-            style={{
-              ...filled,
-              borderRadius: 10,
-              padding: "0.4rem 0.85rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
-              fontSize: "0.85rem",
-              fontWeight: 700,
-              minHeight: 24,
-            }}
-          >
-            {guess ? (
-              <>
-                <span aria-hidden="true" style={{ color: correct ? HIT_GREEN : MISS_RED, fontWeight: 800 }}>
-                  {correct ? "✓" : "✗"}
-                </span>
-                <span>{guess}</span>
-              </>
-            ) : (
-              <span style={{ fontSize: "0.78rem" }}>Guess {i + 1}</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function HintCards({
   theme,
@@ -259,6 +72,7 @@ function HintCards({
   ];
   return (
     <div className="sg-hints" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.6rem" }}>
+      <style>{`@media (max-width: 560px) { .sg-hints { grid-template-columns: 1fr !important; } }`}</style>
       {hints.map((h) => {
         const unlocked = failedCount >= h.unlockAfter;
         return (
@@ -286,27 +100,24 @@ function HintCards({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Game board                                                         */
+/*  Single puzzle                                                      */
 /* ------------------------------------------------------------------ */
 
-function GameBoard({
+function PuzzleView({
   theme,
   puzzleNumber,
   hardMode,
-  onStarted,
+  onProgress,
 }: {
   theme: AppTheme;
   puzzleNumber: number;
   hardMode: boolean;
-  onStarted: () => void;
+  /** Whether today's puzzle has any guesses yet; the workspace locks the difficulty toggle on it. */
+  onProgress: (started: boolean) => void;
 }) {
   const puzzle = useMemo(() => getPuzzle(puzzleNumber), [puzzleNumber]);
   const styles = toolStyles(theme);
-  const [result, setResult] = useState<SkillGuesserResult>(
-    () => readSkillGuesserResult(puzzleNumber) ?? { guesses: [], won: false, done: false },
-  );
-  const [search, setSearch] = useState("");
-  const [staged, setStaged] = useState<string | null>(null);
+  const [result, setResult] = useState(() => readSkillGuesserResult(puzzleNumber) ?? EMPTY_RESULT);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   // Hard mode scores against the skill name (picked from the skill pool);
@@ -321,39 +132,20 @@ function GameBoard({
   const guessed = useMemo(() => new Set(result.guesses), [result.guesses]);
   const failedCount = result.guesses.filter((g) => g !== answer).length;
 
-  // Wordle-style rich presence: board so far + which guess + session time.
-  useEffect(() => {
-    updateGameActivity({
-      game: GAME_META.skill.title,
-      puzzleNumber,
-      squares: result.guesses.map((g) => (g === answer ? "🟩" : "🟥")).join(""),
-      guessCount: result.guesses.length,
-      maxGuesses: MAX_GUESSES,
-      done: result.done,
-      won: result.won,
-    });
-  }, [puzzleNumber, answer, result]);
+  useGamePresence("skill", puzzleNumber, answer, result, MAX_GUESSES);
 
-  function handleSubmit(name?: string) {
-    const guess = name ?? staged;
-    if (!guess || result.done || guessed.has(guess)) return;
-    setStaged(null);
-    setSearch("");
-    setResult((prev) => {
-      if (prev.done || prev.guesses.includes(guess)) return prev;
-      const guesses = [...prev.guesses, guess];
-      const won = guess === answer;
-      const next = { guesses, won, done: won || guesses.length >= MAX_GUESSES };
-      writeSkillGuesserResult(puzzleNumber, next);
-      return next;
-    });
-    // Today's puzzle now has progress; let the workspace lock the mode toggle.
-    onStarted();
-    const finished = guess === answer || result.guesses.length + 1 >= MAX_GUESSES;
-    if (finished) {
+  // The stored guesses are scored against one answer key (skill vs class), so
+  // switching difficulty mid-game would mismatch every prior guess.
+  useEffect(() => onProgress(result.guesses.length > 0), [result, onProgress]);
+
+  function handleSubmit(guess: string) {
+    const next = applyGuess(result, guess, answer, MAX_GUESSES);
+    if (next === result) return;
+    writeSkillGuesserResult(puzzleNumber, next);
+    setResult(next);
+    if (next.done) {
       // Feed the guild scoreboard card exactly once, at the finishing guess.
-      const marks = [...result.guesses, guess].map((g) => g === answer);
-      reportGameResult("skill", puzzleNumber, guess === answer, marks, hardMode);
+      reportGameResult("skill", puzzleNumber, next.won, next.guesses.map((g) => g === answer), hardMode);
       setTimeout(() => setDialogOpen(true), 700);
     }
   }
@@ -362,19 +154,7 @@ function GameBoard({
     <>
       <div className="fade-in panel-card" style={styles.sectionPanel}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.35rem", marginBottom: "0.85rem" }}>
-          <div
-            style={{
-              width: 84,
-              height: 84,
-              borderRadius: 14,
-              border: `1px solid ${theme.border}`,
-              background: theme.timerBg,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-            }}
-          >
+          <div style={{ ...iconFrame, border: `1px solid ${theme.border}`, background: theme.timerBg }}>
             <PuzzleSkillIcon
               puzzle={puzzle}
               size={64}
@@ -394,42 +174,19 @@ function GameBoard({
           </div>
         </div>
 
-        {result.done ? (
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.85rem" }}>
-            <ActionButton theme={theme} label="View Results" onClick={() => setDialogOpen(true)} />
-          </div>
-        ) : (
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.85rem", flexWrap: "wrap" }}>
-            <GuessPicker
-              theme={theme}
-              options={options}
-              search={search}
-              guessed={guessed}
-              placeholder={hardMode ? "Search skills…" : "Search classes…"}
-              ariaLabel={hardMode ? "Guess a skill" : "Guess a class"}
-              emptyLabel={hardMode ? "No skills found" : "No classes found"}
-              onSearchChange={(v) => {
-                setSearch(v);
-                setStaged(null);
-              }}
-              onStage={(name) => {
-                setStaged(name);
-                setSearch(name);
-              }}
-              onSubmit={handleSubmit}
-            />
-            <ActionButton
-              theme={theme}
-              label="Guess"
-              onClick={() => handleSubmit()}
-              disabled={staged === null || guessed.has(staged)}
-              style={{ height: 40, padding: "0 22px" }}
-            />
-          </div>
-        )}
+        <GuessControls
+          theme={theme}
+          done={result.done}
+          options={options}
+          placeholder={hardMode ? "Search skills…" : "Search classes…"}
+          ariaLabel={hardMode ? "Guess a skill" : "Guess a class"}
+          guessed={guessed}
+          onSubmit={handleSubmit}
+          onViewResults={() => setDialogOpen(true)}
+        />
 
         <div style={{ display: "grid", gap: "0.8rem" }}>
-          <GuessSlots theme={theme} guesses={result.guesses} answer={answer} />
+          <GuessSlots theme={theme} guesses={result.guesses} answer={answer} maxGuesses={MAX_GUESSES} />
           <HintCards theme={theme} puzzle={puzzle} failedCount={failedCount} />
         </div>
       </div>
@@ -437,10 +194,25 @@ function GameBoard({
       {dialogOpen && (
         <ResultsDialog
           theme={theme}
+          gameName={GAME_META.skill.title}
+          basePath={BASE_PATH}
           puzzleNumber={puzzleNumber}
-          puzzle={puzzle}
-          result={result}
+          modeTag={hardMode ? " (Hard)" : ""}
           answer={answer}
+          result={result}
+          maxGuesses={MAX_GUESSES}
+          clock={PUZZLE_CLOCK}
+          stats={computeSkillGuesserStats()}
+          revealIcon={
+            <PuzzleSkillIcon
+              puzzle={puzzle}
+              size={44}
+              alt={puzzle.skillName}
+              style={{ imageRendering: "pixelated" }}
+            />
+          }
+          revealHeading={puzzle.className}
+          revealSubheading={puzzle.skillName}
           onClose={() => setDialogOpen(false)}
         />
       )}
@@ -465,106 +237,59 @@ export default function SkillGuesserWorkspace({
   onUpdateSettings: (patch: Partial<ActivitySettings>) => void;
   onChangeMode: (mode: GameMode) => void;
 }) {
-  const [puzzleNumber, setPuzzleNumber] = useState(() => currentPuzzleNumber());
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  // Bumped when stats are wiped so the board remounts from empty storage.
-  const [resetTick, setResetTick] = useState(0);
-  // Bumped after each guess so `started` re-reads storage and locks the toggle.
-  const [progressTick, setProgressTick] = useState(0);
-
-  // Once today's puzzle has any guesses, lock the difficulty toggle: the stored
-  // guesses are scored against one answer key (skill vs class), so switching
-  // mid-game would mismatch every prior guess. It frees up on the next puzzle.
-  const started = useMemo(
-    () => (readSkillGuesserResult(puzzleNumber)?.guesses.length ?? 0) > 0,
-    [puzzleNumber, resetTick, progressTick],
-  );
-
-  // Move to the next puzzle when the UTC day rolls over while the activity is open.
-  useEffect(() => {
-    const t = setTimeout(() => setPuzzleNumber(currentPuzzleNumber()), msUntilNextPuzzle() + 250);
-    return () => clearTimeout(t);
-  }, [puzzleNumber]);
+  // Once today's puzzle has any guesses, the difficulty toggle locks until the
+  // next puzzle (the puzzle view reports this fresh whenever it mounts).
+  const [started, setStarted] = useState(false);
 
   return (
-    <div className="page-content">
-      <div className="tool-container" style={{ maxWidth: 560 }}>
-        <style>{`.sg-option:hover:not(:disabled) { background: ${theme.accentSoft}; }
-@media (max-width: 560px) { .sg-hints { grid-template-columns: 1fr !important; } }`}</style>
-        <div
-          className="tool-header"
-          style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}
-        >
+    <DailyGameWorkspace
+      theme={theme}
+      mode="skill"
+      playerName={playerName}
+      description={`Guess which class learns the daily skill in ${MAX_GUESSES} tries.`}
+      clock={PUZZLE_CLOCK}
+      settings={settings}
+      onUpdateSettings={onUpdateSettings}
+      onChangeMode={onChangeMode}
+      onWipe={wipeSkillGuesserData}
+      headerControls={
+        <SegmentedToggle
+          theme={theme}
+          groupLabel="Difficulty"
+          value={settings.hardMode ? "hard" : "normal"}
+          options={[
+            { value: "normal", label: "Normal" },
+            { value: "hard", label: "Hard" },
+          ]}
+          disabled={started}
+          disabledTitle="Finish today's puzzle to switch difficulty"
+          onChange={(v) => onUpdateSettings({ hardMode: v === "hard" })}
+        />
+      }
+      help={
+        <>
           <div>
-            <div className="tool-header-title" style={{ color: theme.text }}>
-              Mapledle #{puzzleNumber} - A MapleDoro Game
-            </div>
-            <div className="tool-header-desc" style={{ color: theme.muted }}>
-              Guess which class learns the daily skill in {MAX_GUESSES} tries.
-              {playerName ? (
-                <>
-                  {" "}
-                  Playing as <span style={{ color: theme.accentText, fontWeight: 700 }}>{playerName}</span>.
-                </>
-              ) : null}
-            </div>
+            Guess which MapleStory class learns the daily skill in {MAX_GUESSES} tries. Wrong guesses
+            unlock hints: the class&apos;s main stat after 2 misses, its secondary stat after 3, and its
+            weapon after 4. A new puzzle arrives every day at 00:00 UTC.
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
-            <SegmentedToggle
-              theme={theme}
-              groupLabel="Game"
-              value={"skill" as GameMode}
-              options={[
-                { value: "skill", label: GAME_META.skill.shortLabel },
-                { value: "bgm", label: GAME_META.bgm.shortLabel },
-              ]}
-              onChange={onChangeMode}
-            />
-            <SegmentedToggle
-              theme={theme}
-              groupLabel="Difficulty"
-              value={settings.hardMode ? "hard" : "normal"}
-              options={[
-                { value: "normal", label: "Normal" },
-                { value: "hard", label: "Hard" },
-              ]}
-              disabled={started}
-              disabledTitle="Finish today's puzzle to switch difficulty"
-              onChange={(v) => onUpdateSettings({ hardMode: v === "hard" })}
-            />
-            <HeaderIconButton theme={theme} label="How to play" onClick={() => setHelpOpen(true)}>
-              ?
-            </HeaderIconButton>
-            <HeaderIconButton theme={theme} label="Settings" onClick={() => setSettingsOpen(true)}>
-              ⚙
-            </HeaderIconButton>
+          <div>
+            Switch to <strong>Hard</strong> in the header to name the skill itself instead of the class.
+            Pick your difficulty before your first guess: it locks in for the day once you start.
           </div>
-        </div>
-
-        <GameBoard
-          key={`${puzzleNumber}:${resetTick}:${settings.hardMode ? "h" : "n"}`}
+        </>
+      }
+    >
+      {(puzzleNumber) => (
+        // Keyed by difficulty so the board re-reads its answer pool when it changes.
+        <PuzzleView
+          key={settings.hardMode ? "hard" : "normal"}
           theme={theme}
           puzzleNumber={puzzleNumber}
           hardMode={settings.hardMode}
-          onStarted={() => setProgressTick((n) => n + 1)}
+          onProgress={setStarted}
         />
-
-        {settingsOpen && (
-          <SettingsDialog
-            theme={theme}
-            settings={settings}
-            gameTitle={GAME_META.skill.title}
-            onUpdateSettings={onUpdateSettings}
-            onWipe={() => {
-              wipeSkillGuesserData();
-              setResetTick((n) => n + 1);
-            }}
-            onClose={() => setSettingsOpen(false)}
-          />
-        )}
-        {helpOpen && <HelpDialog theme={theme} onClose={() => setHelpOpen(false)} />}
-      </div>
-    </div>
+      )}
+    </DailyGameWorkspace>
   );
 }

@@ -96,7 +96,7 @@ export const BGM_GUESSER_ANSWER_DATA: [string, string, 0 | 1][] = [
   ["Neo Tokyo", "TokyoK", 0],
   ["Nett's Pyramid", "Pyramid", 0],
   ["New Leaf City", "NLC", 0],
-  ["Nightmare Wonderland", "nightmareParadise", 0],
+  ["Nightmare Paradise", "nightmareParadise", 0],
   ["Ninja Castle", "jipangu", 0],
   ["Odium", "odium", 0],
   ["Omega Sector", "OmegaSector", 0],

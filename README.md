@@ -26,8 +26,16 @@ Discord client ──iframe──▶ <app id>.discordsays.com (activity proxy)
 - **`client/`** — Vite + React 19 + TypeScript. The game components are a port
   of the MapleDoro website's skill-guesser and bgm-guesser features
   (next/image, next/link, and the SSR mount gate removed; everything else kept
-  as close to verbatim as possible). Fonts are self-hosted via `@fontsource`
-  because Discord's CSP blocks Google Fonts inside the activity iframe.
+  as close to verbatim as possible). Like the website, the chrome both games
+  share lives once at the top of `client/`: `DailyGameWorkspace` (header,
+  game switcher, help/settings dialogs, UTC rollover, rich presence),
+  `GuessControls` (searchable picker + Guess/View Results), `shared-ui.tsx`
+  (`GuessSlots`), `ResultsDialog` (share text, squares, stats, countdown) and
+  `dailyGame.ts` (`GuessResult`, `applyGuess`, `computeGuessStats`,
+  `makePuzzleClock`). Each game folder keeps only what differs: the skill icon,
+  hint cards and hard-mode toggle for Mapledle; the audio player and area marks
+  for BGM Guesser. Fonts are self-hosted via `@fontsource` because Discord's
+  CSP blocks Google Fonts inside the activity iframe.
 - **`server/`** — Express 5. Serves the built bundle and exposes
   `POST /api/token` (also at `/.proxy/api/token`), which exchanges the OAuth2
   authorization code from `sdk.commands.authorize()` for an access token using
@@ -102,8 +110,10 @@ and must stay in sync — each game's daily puzzle number and answer are derived
 from them, and a drift would give Discord players a different puzzle than the
 website:
 
+- `client/dailyGame.ts` (from `src/features/games/dailyGame.ts`; the puzzle
+  clock the two `puzzles.ts` files import)
 - `client/skill-guesser/classes.ts`
-- `client/skill-guesser/puzzles.ts` (the `EPOCH_UTC_MS` / `XOR_KEY` pair)
+- `client/skill-guesser/puzzles.ts` (the `PUZZLE_CLOCK` epoch / `XOR_KEY` pair)
 - `client/skill-guesser/puzzle-data.generated.ts` (auto-generated — never edit
   by hand)
 - `client/bgm-guesser/puzzles.ts` (same epoch/key pairing)
@@ -113,6 +123,7 @@ website:
 `server/games.ts` repeats each game's epoch and guess count so the scoreboard
 cards number and size themselves correctly; update it alongside the puzzle
 files. The two `storage.ts` modules are activity-specific (they share
-`client/games-store.ts`) and don't need re-copying.
+`client/games-store.ts`, and Mapledle keeps one result per puzzle rather than
+the website's one per mode) and don't need re-copying.
 
 After re-copying, rebuild and redeploy (DEPLOYMENT.md §8).

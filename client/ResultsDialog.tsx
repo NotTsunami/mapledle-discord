@@ -1,35 +1,17 @@
 /*
-  Port of mapledoro's BGM Guesser ResultsDialog. Differences from the web
+  Port of mapledoro's shared games/ResultsDialog.tsx. Differences from the web
   version: the manual-copy fallback for Discord clients that block the
   clipboard, and condensed lifetime stats (the activity has no stats panel on
   the main view).
 */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import MarkIcon from "../components/MarkIcon";
-import ModalShell from "../components/ModalShell";
-import { toolStyles, type AppTheme } from "../theme";
-import {
-  MAX_GUESSES,
-  findBgmGuesserAnswer,
-  msUntilNextPuzzle,
-  type BgmGuesserPuzzle,
-} from "./puzzles";
-import { computeBgmGuesserStats, type BgmGuesserResult } from "./storage";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import ModalShell from "./components/ModalShell";
+import type { GuessResult, GuessStats, PuzzleClock } from "./dailyGame";
+import { toolStyles, type AppTheme } from "./theme";
 
-const SHARE_URL = "https://www.mapledoro.com/games/bgm-guesser";
-
-function buildShareText(
-  puzzleNumber: number,
-  answer: string,
-  result: BgmGuesserResult,
-): string {
-  const score = result.won ? `${result.guesses.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
-  const squares = result.guesses
-    .map((g) => (g === answer ? "\u{1F7E9}" : "\u{1F7E5}"))
-    .join("");
-  return `BGM Guesser #${puzzleNumber} ${score}\n${squares}\n${SHARE_URL}`;
-}
+// Shares link straight to the day that was played, via the website's archive route.
+const SITE_ORIGIN = "https://www.mapledoro.com";
 
 function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -40,13 +22,13 @@ function formatCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-function NextPuzzleCountdown({ theme }: { theme: AppTheme }) {
-  const [remaining, setRemaining] = useState(() => msUntilNextPuzzle());
+function NextPuzzleCountdown({ theme, clock }: { theme: AppTheme; clock: PuzzleClock }) {
+  const [remaining, setRemaining] = useState(() => clock.msUntilNextPuzzle());
 
   useEffect(() => {
-    const id = setInterval(() => setRemaining(msUntilNextPuzzle()), 1000);
+    const id = setInterval(() => setRemaining(clock.msUntilNextPuzzle()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [clock]);
 
   return (
     <div style={{ fontSize: "0.8rem", fontWeight: 700, color: theme.muted }}>
@@ -59,8 +41,7 @@ function NextPuzzleCountdown({ theme }: { theme: AppTheme }) {
 }
 
 /** Condensed lifetime stats (the full panel was dropped from the main view). */
-function MiniStats({ theme }: { theme: AppTheme }) {
-  const stats = useMemo(() => computeBgmGuesserStats(), []);
+function MiniStats({ theme, stats }: { theme: AppTheme; stats: GuessStats }) {
   const items = [
     { label: "Played", value: String(stats.played) },
     { label: "Win Rate", value: `${stats.winRate}%` },
@@ -109,17 +90,41 @@ const revealCard: CSSProperties = {
   textAlign: "left",
 };
 
+/** End-of-game dialog: outcome, answer reveal, share squares, stats, next-puzzle countdown. */
 export default function ResultsDialog({
   theme,
+  gameName,
+  basePath,
   puzzleNumber,
-  puzzle,
+  modeTag = "",
+  answer,
   result,
+  maxGuesses,
+  clock,
+  stats,
+  revealIcon,
+  revealHeading,
+  revealSubheading,
   onClose,
 }: {
   theme: AppTheme;
+  /** Player-facing name, used in the heading and share text. */
+  gameName: string;
+  /** Website route base, e.g. "/games/bgm-guesser"; the share link appends the puzzle number. */
+  basePath: string;
   puzzleNumber: number;
-  puzzle: BgmGuesserPuzzle;
-  result: BgmGuesserResult;
+  /** Appended after the puzzle number, e.g. " (Hard)". */
+  modeTag?: string;
+  /** The value guesses were scored against. */
+  answer: string;
+  result: GuessResult;
+  maxGuesses: number;
+  clock: PuzzleClock;
+  /** Lifetime stats for this game, computed once when the dialog opens. */
+  stats: GuessStats;
+  revealIcon: ReactNode;
+  revealHeading: string;
+  revealSubheading: string;
   onClose: () => void;
 }) {
   const styles = toolStyles(theme);
@@ -127,14 +132,17 @@ export default function ResultsDialog({
   // we then reveal the text pre-selected for a manual Ctrl+C.
   const [shareState, setShareState] = useState<"idle" | "copied" | "manual">("idle");
   const manualRef = useRef<HTMLTextAreaElement>(null);
-  const answer = findBgmGuesserAnswer(puzzle.answer);
-  const shareText = buildShareText(puzzleNumber, puzzle.answer, result);
 
   useEffect(() => {
     if (shareState !== "copied") return;
     const t = setTimeout(() => setShareState("idle"), 2000);
     return () => clearTimeout(t);
   }, [shareState]);
+
+  const score = result.won ? `${result.guesses.length}/${maxGuesses}` : `X/${maxGuesses}`;
+  const squares = result.guesses.map((g) => (g === answer ? "\u{1F7E9}" : "\u{1F7E5}"));
+  const link = `${SITE_ORIGIN}${basePath}/${puzzleNumber}`;
+  const shareText = `${gameName} #${puzzleNumber}${modeTag} ${score}\n${squares.join("")}\n${link}`;
 
   async function handleShare() {
     try {
@@ -164,8 +172,6 @@ export default function ResultsDialog({
     }
   }
 
-  const score = result.won ? `${result.guesses.length}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
-
   const manualTextareaStyle: CSSProperties =
     shareState === "manual"
       ? {
@@ -190,7 +196,7 @@ export default function ResultsDialog({
   return (
     <ModalShell
       theme={theme}
-      ariaLabel="BGM Guesser results"
+      ariaLabel={`${gameName} results`}
       onClose={onClose}
       style={{ width: "min(420px, calc(100% - 2rem))", padding: "1.5rem" }}
     >
@@ -199,30 +205,30 @@ export default function ResultsDialog({
           {result.won ? "You got it!" : "Out of guesses!"}
         </div>
         <div style={{ fontSize: "0.8rem", fontWeight: 700, color: theme.muted, marginTop: "0.2rem" }}>
-          BGM Guesser #{puzzleNumber} - {score}
+          {gameName} #{puzzleNumber}{modeTag} — {score}
         </div>
 
         <div style={{ ...revealCard, border: `1px solid ${theme.border}`, background: theme.timerBg }}>
           <div style={{ ...revealIconFrame, background: theme.panel, border: `1px solid ${theme.border}` }}>
-            {answer && <MarkIcon id={answer.mark} size={44} style={{ imageRendering: "pixelated" }} />}
+            {revealIcon}
           </div>
           <div>
             <div style={{ fontSize: "0.92rem", fontWeight: 800, color: theme.text }}>
-              {puzzle.answer}
+              {revealHeading}
             </div>
             <div style={{ fontSize: "0.78rem", fontWeight: 600, color: theme.muted }}>
-              {puzzle.title}
+              {revealSubheading}
             </div>
           </div>
         </div>
 
         <div style={{ fontSize: "1.3rem", letterSpacing: "0.15em", marginBottom: "1.1rem" }} aria-hidden="true">
-          {result.guesses.map((g, i) => (
-            <span key={i}>{g === puzzle.answer ? "\u{1F7E9}" : "\u{1F7E5}"}</span>
+          {squares.map((sq, i) => (
+            <span key={i}>{sq}</span>
           ))}
         </div>
 
-        <MiniStats theme={theme} />
+        <MiniStats theme={theme} stats={stats} />
 
         {shareState === "manual" && (
           <div style={{ fontSize: "0.75rem", fontWeight: 700, color: theme.muted, marginBottom: "0.35rem" }}>
@@ -258,7 +264,7 @@ export default function ResultsDialog({
           </button>
         </div>
 
-        <NextPuzzleCountdown theme={theme} />
+        <NextPuzzleCountdown theme={theme} clock={clock} />
       </div>
     </ModalShell>
   );

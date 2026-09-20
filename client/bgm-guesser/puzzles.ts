@@ -6,9 +6,10 @@
   at 00:00:00 UTC; puzzle #1 ran on BGM_GUESSER_EPOCH day.
 */
 
+import { makePuzzleClock } from "../dailyGame";
 import { BGM_GUESSER_ANSWER_DATA, BGM_GUESSER_PUZZLE_DATA } from "./puzzle-data.generated";
 
-export interface BgmGuesserPuzzle {
+interface BgmGuesserPuzzle {
   /** Manifest group, e.g. "Bgm53". Track names aren't unique without it. */
   group: string;
   track: string;
@@ -27,9 +28,8 @@ export interface BgmGuesserAnswer {
 
 export const MAX_GUESSES = 3;
 
-// UTC day of puzzle #1.
-const EPOCH_UTC_MS = Date.UTC(2026, 7, 4);
-const DAY_MS = 86_400_000;
+/** Puzzle numbering and rollover; the argument is the UTC day of puzzle #1. */
+export const PUZZLE_CLOCK = makePuzzleClock(Date.UTC(2026, 7, 4));
 const XOR_KEY = "mapledoro-bgm-guesser";
 
 let cache: BgmGuesserPuzzle[] | null = null;
@@ -54,21 +54,7 @@ export function findBgmGuesserAnswer(name: string): BgmGuesserAnswer | undefined
   return answersByName.get(name);
 }
 
-export function currentPuzzleNumber(nowMs = Date.now()): number {
-  return Math.max(1, Math.floor((nowMs - EPOCH_UTC_MS) / DAY_MS) + 1);
-}
-
-/** UTC midnight (epoch ms) a given puzzle number went live. */
-export function puzzleDateMs(puzzleNumber: number): number {
-  return EPOCH_UTC_MS + (puzzleNumber - 1) * DAY_MS;
-}
-
 export function getPuzzle(puzzleNumber: number): BgmGuesserPuzzle {
   const puzzles = decodePuzzles();
   return puzzles[(puzzleNumber - 1) % puzzles.length];
-}
-
-/** Milliseconds until the next 00:00:00 UTC rollover. */
-export function msUntilNextPuzzle(nowMs = Date.now()): number {
-  return DAY_MS - ((nowMs - EPOCH_UTC_MS) % DAY_MS);
 }

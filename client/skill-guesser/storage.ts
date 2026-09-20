@@ -2,33 +2,30 @@
   Skill Guesser's slice of the shared `mapledoro_games_v1` store; the BGM
   Guesser keeps its results in the same blob under its own section (see
   ../games-store.ts).
+
+  Unlike the website, which keeps a Normal and a Hard result per puzzle, the
+  activity stores one result per puzzle: the difficulty is chosen before the
+  first guess and locked for the day.
 */
 
-import {
-  computeStats,
-  readResult,
-  wipeResults,
-  writeResult,
-  type GameResult,
-  type GameStats,
-} from "../games-store";
+import { computeGuessStats, type GuessResult, type GuessStats } from "../dailyGame";
+import { readResult, readResults, wipeResults, writeResult } from "../games-store";
 import { MAX_GUESSES } from "./puzzles";
 
-export type SkillGuesserResult = GameResult;
-export type SkillGuesserStats = GameStats;
+const SECTION = "skillGuesser";
 
-export function readSkillGuesserResult(puzzleNumber: number): SkillGuesserResult | null {
-  return readResult("skillGuesser", puzzleNumber);
+export function readSkillGuesserResult(puzzleNumber: number): GuessResult | null {
+  return readResult(SECTION, puzzleNumber);
 }
 
-export function writeSkillGuesserResult(puzzleNumber: number, result: SkillGuesserResult): void {
-  writeResult("skillGuesser", puzzleNumber, result);
+export function writeSkillGuesserResult(puzzleNumber: number, result: GuessResult): void {
+  writeResult(SECTION, puzzleNumber, result);
 }
 
 export function wipeSkillGuesserData(): void {
-  wipeResults("skillGuesser");
+  wipeResults(SECTION);
 }
 
-export function computeSkillGuesserStats(): SkillGuesserStats {
-  return computeStats("skillGuesser", MAX_GUESSES);
+export function computeSkillGuesserStats(): GuessStats {
+  return computeGuessStats(Object.values(readResults(SECTION)), MAX_GUESSES);
 }
